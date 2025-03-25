@@ -357,6 +357,12 @@ syscall_handler:
 	## Dispatch on the requested syscall.
 	lw		t0,		syscall_EXIT
 	beq		a0,		t0,		handle_exit			# Is it an EXIT request?
+
+	lw t0, syscall_RUN
+	beq a0, t0, handle_run
+
+	lw t0, syscall_PRINT
+	beq a0, t0, handle_print
 	
 	## The syscall code is invalid, so print an error message and halt.
 	la		a0,		invalid_syscall_code_msg			# Print failure.
@@ -373,6 +379,23 @@ handle_exit:
 	call		print
 
 	## Fall through...
+
+handle_run:
+	# Load ROM number to a0
+	mv a0, a1
+	
+	# Run program
+	call run_program
+
+	# Save return value
+	mv t0, a0
+	eret
+
+handle_print:
+	# Move string pointer to a0
+	mv a0, a1
+	call print
+	eret
 
 syscall_handler_halt:
 	
@@ -460,8 +483,45 @@ userspace_jump:
 	eret
 ### ================================================================================================================================
 	
+### ================================================================================================================================
+### Procedure: run_program
+###   [a0]: ROM_number -- The ROM number to run
+### Return value:
+###   [a0]: 0 = success, 1 = invalid ROM number, 2 = insufficient RAM, 3 = other error
+### ================================================================================================================================
 
-	
+run_program:
+	## Prologue
+	addi sp, sp, -8
+	sw ra, 4(sp)
+	sw fp, 0(sp)
+	addi fp, sp, 8
+
+	# Find ROM
+	mv a1, a0
+	lw a0, ROM_device_code
+	call find_device
+	beqz a0, run_program_invalid
+
+	# Load ROM into RAM
+
+	# Setup process address space
+
+	# Call userspace_jump to the program entry point
+
+	# Return success
+	li a0, 0
+	j run_program_return
+
+run_program_invalid:
+        li a0, 1                     # Return invalid ROM number error
+
+run_program_return:
+        ## Epilogue
+        lw ra, 4(sp)
+		lw fp, 0(sp)
+		addi sp, sp, 8
+		ret
 ### ================================================================================================================================
 ### Procedure: main
 ### Preserved registers:
@@ -570,7 +630,9 @@ kernel_error_unmanaged_interrupt:	0xffff0004
 
 	## Syscall codes
 syscall_EXIT:		0xca110001
-	
+syscall_RUN: 0xca110002
+syscall_PRINT: 0xca110003
+
 	## Constants for printing and console management.
 console_width:		80
 console_height:		24
