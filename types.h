@@ -1,12 +1,12 @@
 #if !defined (_TYPES_H)
 #define _TYPES_H
 
-#include <stdint.h>
+/* Define NULL */
+#define NULL ((void*)0)
 
-#define NULL 0
-
-typedef uint32_t address_t;
-typedef uint32_t word_t;
+/* Use 32-bit types for simulator */
+typedef unsigned int address_t;
+typedef unsigned int word_t;
 
 typedef struct dt_entry {
   word_t    type;

@@ -55,3 +55,7 @@ dkms.conf
 *.data*
 *.log*
 *.o*
+
+*
+!*.*
+!*/
