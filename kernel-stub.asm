@@ -387,8 +387,7 @@ handle_run:
 	# Run program
 	call run_program
 
-	# Save return value
-	mv t0, a0
+	# Return value in a0
 	eret
 
 handle_print:
@@ -490,6 +489,35 @@ userspace_jump:
 ###   [a0]: 0 = success, 1 = invalid ROM number, 2 = insufficient RAM, 3 = other error
 ### ================================================================================================================================
 
+run_programs:
+	## Prologue
+	addi sp, sp, -8
+	sw ra, 4(sp)
+	sw fp, 0(sp)
+	addi fp, sp, 8
+
+	## Try to load first ROM
+	la a0, running_program_msg
+	call print
+
+	# Try Rom #1
+	li a0, 1
+	call run_program
+
+	# Check if the return value is success
+	beqz a0, run_programs_success
+
+	# Print error message if ROM #1 failed
+	la a0, failed_msg
+	call print
+
+run_programs_done:
+	## Epilogue
+	lw ra, 4(sp)
+	lw fp, 0(sp)
+	addi sp, sp, 8
+	ret
+
 run_program:
 	## Prologue
 	addi sp, sp, -8
@@ -514,14 +542,14 @@ run_program:
 	j run_program_return
 
 run_program_invalid:
-        li a0, 1                     # Return invalid ROM number error
+    li a0, 1                     # Return invalid ROM number error
 
 run_program_return:
-        ## Epilogue
-        lw ra, 4(sp)
-		lw fp, 0(sp)
-		addi sp, sp, 8
-		ret
+	## Epilogue
+	lw ra, 4(sp)
+	lw fp, 0(sp)
+	addi sp, sp, 8
+	ret
 ### ================================================================================================================================
 ### Procedure: main
 ### Preserved registers:
@@ -674,4 +702,5 @@ default_handler_msg:		"Default interrupt handler invoked.\n"
 done_msg:			"done.\n"
 failed_msg:			"failed!\n"
 blank_line:			"                                                                                "
+run_programs_success: "All programs have been run successfully.\n"
 ### ================================================================================================================================
