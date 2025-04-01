@@ -4,6 +4,9 @@
 /* Define NULL */
 #define NULL ((void*)0)
 
+/* Define uint32_t for compatibility with kernel stub */
+typedef unsigned int uint32_t;
+
 /* Use 32-bit types for simulator */
 typedef unsigned int address_t;
 typedef unsigned int word_t;
