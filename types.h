@@ -23,4 +23,8 @@ typedef struct DMA_portal {
   word_t    length;
 } DMA_portal_s;
 
+typedef struct free_block {
+  struct free_block *next;
+} free_block_s;
+
 #endif /* _TYPES_H */

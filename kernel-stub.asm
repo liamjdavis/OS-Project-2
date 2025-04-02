@@ -572,6 +572,11 @@ main_with_console:
 	la		a0,		done_msg					# arg[0] = done_msg
 	call		print
 
+	## Call init_memory(kern_limit, ram_limit) to divide RAM into 32 KB blocks and create free block tracking structure
+	lw a0, kernel_limit
+	lw a1, RAM_limit
+	call init_memory
+	
 	## Call run_programs() to invoke each program ROM in turn.
 	call		run_programs
 	

@@ -13,8 +13,11 @@
 #define BYTES_PER_WORD  4
 #define BITS_PER_BYTE   8
 #define BITS_PER_NYBBLE 4
+#define BLOCK_SIZE      0x8000 // 32 KB
 
 static char hex_digits[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+
+static free_block_s* free_list_head = NULL;
 /* =============================================================================================================================== */
 
 
@@ -38,7 +41,35 @@ void int_to_hex (word_t value, char* buffer) {
 /* =============================================================================================================================== */
 
 
+/* =============================================================================================================================== */
+void init_memory(address_t kern_limit, address_t ram_limit) {
+  address_t current_block_start = kern_limit; // Start allocating after kernel
 
+
+  print("Initializing RAM free block list...\n");
+  
+  while (current_block_start + BLOCK_SIZE <= ram_limit) {
+    free_block_s* new_block = (free_block_s*)current_block_start;
+    new_block->next = free_list_head;
+    free_list_head = new_block;
+    current_block_start += BLOCK_SIZE;
+  }
+
+  // Debug print the number of blocks created
+  int count = 0;
+  free_block_s* temp = free_list_head;
+  while(temp != NULL) {
+    count++;
+    temp = temp->next;
+  }
+  char count_str[9];
+  print("Created ");
+  int_to_hex(count, count_str);
+  print(count_str);
+  print(" free blocks.");
+
+
+} /* init_memory() */
 /* =============================================================================================================================== */
 void run_programs () {
 
