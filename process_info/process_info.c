@@ -3,7 +3,6 @@
 #include <string.h>
 #include "process_info.h"
 #include "../types.h"
-#include "../linked_list.h"
 
 /* Structure to store process information */
 typedef struct process_info {
