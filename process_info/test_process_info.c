@@ -6,9 +6,9 @@ int main() {
     process_info_t* process_list = NULL;
 
     printf("Inserting processes...\n");
-    insert_process(&process_list, 1, "Init", 0, (void*)0x1000, (void*)0x2000);
-    insert_process(&process_list, 2, "Shell", 1, (void*)0x1100, (void*)0x2100);
-    insert_process(&process_list, 3, "Editor", 2, (void*)0x1200, (void*)0x2200);
+    insert_process(&process_list, 1, "Init", (void*)0x1000, (void*)0x2000);
+    insert_process(&process_list, 2, "Shell", (void*)0x1100, (void*)0x2100);
+    insert_process(&process_list, 3, "Editor", (void*)0x1200, (void*)0x2200);
 
     printf("\nCurrent process list:\n");
     display_processes(process_list);
