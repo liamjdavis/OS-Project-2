@@ -15,7 +15,7 @@ typedef struct process_info {
 } process_info_t;
 
 /* Function to insert a new process into the circular doubly linked list */
-void insert_process(process_info_t** head, int pid, const char* name, int priority, void* sp, void* pc) {
+void insert_process(process_info_t** head, int pid, const char* name, void* sp, void* pc) {
     process_info_t* new_process = (process_info_t*)malloc(sizeof(process_info_t));
     if (!new_process) {
         printf("Memory allocation failed\n");
