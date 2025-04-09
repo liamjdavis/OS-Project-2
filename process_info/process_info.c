@@ -1,19 +1,9 @@
 #include <stdio.h>
-#include <stdlib.h>
+#include "../memory_allocator/memory-alloc.h"
 #include <string.h>
 #include "process_info.h"
 #include "../types.h"
 #include "../linked_list.h"
-
-/* Structure to store process information */
-typedef struct process_info {
-    int pid;
-    char name[50];
-    void* sp;  // Stack pointer
-    void* pc;  // Program counter
-    struct process_info* next;
-    struct process_info* prev;
-} process_info_t;
 
 /* Function to insert a new process into the circular doubly linked list */
 void insert_process(process_info_t** head, int pid, const char* name, void* sp, void* pc) {
