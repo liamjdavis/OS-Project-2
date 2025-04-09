@@ -16,7 +16,7 @@ typedef struct process_info {
 } process_info_t;
 
 /* Function prototypes */
-void insert_process(process_info_t** head, int pid, const char* name, int priority, void* sp, void* pc);
+void insert_process(process_info_t** head, int pid, const char* name, void* sp, void* pc);
 void delete_process(process_info_t** head, int pid);
 void display_processes(process_info_t* head);
 
