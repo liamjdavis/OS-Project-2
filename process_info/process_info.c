@@ -1,19 +1,26 @@
-#include <stdio.h>
-#include "../memory_allocator/memory-alloc.h"
-#include <string.h>
 #include "process_info.h"
+#include "../memory_allocator/memory-alloc.h"
 #include "../types.h"
 #include "../linked_list.h"
+
+/* Custom string copy to replace strncpy */
+static void my_strncpy(char* dest, const char* src, int n) {
+    int i;
+    for (i = 0; i < n - 1 && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+    dest[i] = '\0';
+}
 
 /* Function to insert a new process into the circular doubly linked list */
 void insert_process(process_info_t** head, int pid, const char* name, void* sp, void* pc) {
     process_info_t* new_process = (process_info_t*)malloc(sizeof(process_info_t));
     if (!new_process) {
-        printf("Memory allocation failed\n");
+        // Memory allocation failed, but we can't use printf
         return;
     }
     new_process->pid = pid;
-    strncpy(new_process->name, name, 50);
+    my_strncpy(new_process->name, name, 50);
     new_process->sp = sp;
     new_process->pc = pc;
 
@@ -62,12 +69,11 @@ void delete_process(process_info_t** head, int pid) {
 /* Function to display the process list */
 void display_processes(process_info_t* head) {
     if (head == NULL) {
-        printf("No processes available\n");
         return;
     }
+    
     process_info_t* temp = head;
     do {
-        printf("PID: %d, Name: %s, SP: %p, PC: %p\n", temp->pid, temp->name, temp->sp, temp->pc);
         temp = temp->next;
     } while (temp != head);
 }

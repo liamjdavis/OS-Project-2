@@ -1,10 +1,6 @@
 #ifndef PROCESS_INFO_H
 #define PROCESS_INFO_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 /* Structure to store process information */
 typedef struct process_info {
     int pid;

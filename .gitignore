@@ -62,3 +62,4 @@ dkms.conf
 
 *.vmx
 *.log
+*.o

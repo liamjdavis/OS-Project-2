@@ -1,6 +1,6 @@
 	.text
 	.attribute	4, 16
-	.attribute	5, "rv32i2p1_m2p0_zmmul1p0"
+	.attribute	5, "rv32i2p1_m2p0"
 	.file	"kernel.c"
 	.globl	int_to_hex                      # -- Begin function int_to_hex
 	.p2align	2
@@ -204,8 +204,8 @@ hex_digits:
 	.type	kernel_L.str,@object                  # @.str
 	.section	.rodata.str1.1,"aMS",@progbits,1
 kernel_L.str:
-	.asciz	"Initializing memory free list...\n"
-	.size	kernel_L.str, 34
+	.asciz	"Initializing RAM free block list...\n"
+	.size	kernel_L.str, 37
 
 	.type	free_list_head,@object          # @free_list_head
 	.section	.sbss,"aw",@nobits
@@ -248,7 +248,7 @@ kernel_L.str.5:
 	.asciz	"Running program...\n"
 	.size	kernel_L.str.5, 20
 
-	.ident	"clang version 19.1.6"
+	.ident	"Ubuntu clang version 18.1.3 (1ubuntu1)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
 	.addrsig_sym int_to_hex

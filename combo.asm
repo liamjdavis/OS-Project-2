@@ -450,40 +450,30 @@ default_handler:
 	
 ### ================================================================================================================================
 ### Procedure: init_trap_table
-### Caller preserved registers:	
-###   [fp + 0]:      pfp
-###   [ra / fp + 4]: pra
-### Parameters:
-###   [a0]: trap_base -- The address of the trap table to initialize and enable.
-### Return value:
-###   <none>
-### Callee preserved registers:
-###   <none>
-### Locals:
-###   [t0]: default_handler_ptr -- A pointer to the default interrupt handler
 
 init_trap_table:
 
-	## Set the 13 entries to point to some interrupt handler.
-	la		t0,		default_handler				# t0 = default_handler()
-	la		t1,		syscall_handler				# t1 = syscall_handler()
-	sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
-	sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
-	sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
-	sw		t0,		0x0c(a0)				# tt[CLOCK_ALARM]          = default_handler()
-	sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
-	sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
-	sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
-	sw		t0,		0x1c(a0)				# tt[PERMISSION_VIOLATION] = default_handler()
-	sw		t0,		0x20(a0)				# tt[INVALID_SHIFT_AMOUNT] = default_handler()
-	sw		t1,		0x24(a0)				# tt[SYSTEM_CALL]          = syscall_handler()
-	sw		t0,		0x28(a0)				# tt[SYSTEM_BREAK]         = default_handler()
-	sw		t0,		0x2c(a0)				# tt[INVALID_DEVICE_VALUE] = default_handler()
-	sw		t0,		0x30(a0)				# tt[DEVICE_FAILURE]       = default_handler()
+    ## Set the 13 entries to point to some interrupt handler.
+    la		t0,		default_handler				# t0 = default_handler()
+    la		t1,		syscall_handler				# t1 = syscall_handler()
+    la		t2,		alarm_handler				# t2 = alarm_handler()
+    sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
+    sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
+    sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
+    sw		t2,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
+    sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
+    sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
+    sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
+    sw		t0,		0x1c(a0)				# tt[PERMISSION_VIOLATION] = default_handler()
+    sw		t0,		0x20(a0)				# tt[INVALID_SHIFT_AMOUNT] = default_handler()
+    sw		t1,		0x24(a0)				# tt[SYSTEM_CALL]          = syscall_handler()
+    sw		t0,		0x28(a0)				# tt[SYSTEM_BREAK]         = default_handler()
+    sw		t0,		0x2c(a0)				# tt[INVALID_DEVICE_VALUE] = default_handler()
+    sw		t0,		0x30(a0)				# tt[DEVICE_FAILURE]       = default_handler()
 
-	## Set the TBR to point to the trap table, and the IBR to point to the interrupt buffer.
-	csrw		tb,		a0					# tb = trap_base
-	ret
+    ## Set the TBR to point to the trap table, and the IBR to point to the interrupt buffer.
+    csrw		tb,		a0					# tb = trap_base
+    ret
 ### ================================================================================================================================
 
 
@@ -492,10 +482,43 @@ init_trap_table:
 ### Procedure: userspace_jump
 
 userspace_jump:
-	lw		sp,		RAM_limit
-	lw		fp,		RAM_limit
-	csrw		epc,		a0
-	eret
+    ## Set up stack/frame pointers for userspace
+    lw		sp,		RAM_limit
+    lw		fp,		RAM_limit
+    
+    ## Save the target PC - we will jump to this address
+    csrw		epc,		a0
+    
+    ## Set the alarm for the current time quantum
+    lw		t0,		time_quantum
+    csrw		al,		t0			# Set the alarm register
+    
+    ## Enable interrupts for alarm
+    li		t0,		0x2			# bit 1 = alarm interrupt enable
+    csrw		ie,		t0
+    
+    ## Mark scheduler as active
+    li		t0,		1
+    sw		t0,		scheduler_active,	t6
+    
+    ## Print message about starting scheduler
+    la		a0,		scheduler_start_msg
+    call		print
+    
+    ## Print the quantum value
+    lw		a0,		time_quantum
+    addi		sp,		sp,		-16
+    mv		a1,		sp
+    call		int_to_dec			# Convert to decimal string
+    mv		a0,		sp
+    call		print
+    
+    la		a0,		scheduler_cycles_msg
+    call		print
+    addi		sp,		sp,		16	# Restore stack
+    
+    ## Jump to user space with interrupts enabled
+    eret
 ### ================================================================================================================================
 	
 ### ================================================================================================================================
@@ -654,7 +677,16 @@ console_base:		0
 console_limit:		0
 kernel_base:		0
 kernel_limit:		0
-DMA_portal_ptr:		0
+DMA_portal_ptr:			0
+
+	## Scheduling-related variables
+current_process:	0	# Current running process ID
+scheduler_active:	0	# Flag indicating if scheduler is active
+time_quantum:		10000	# Default time quantum (clock cycles)
+saved_user_pc:		0	# Saved program counter for current process
+saved_user_sp:		0	# Saved stack pointer for current process
+saved_user_fp:		0	# Saved frame pointer for current process
+saved_registers:	0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0	# Space for saved registers
 ### ================================================================================================================================
 
 
@@ -681,6 +713,195 @@ blank_line:			"                                                                 
 run_programs_success: "All programs have been run successfully.\n"
 debug_received_msg: "Received syscall: 0x"
 debug_exit_msg: "EXIT code is: 0x"
+alarm_received_msg: "Alarm interrupt received.\n"
+scheduler_start_msg:		"Starting scheduler with quantum of "
+scheduler_cycles_msg:		" cycles.\n"
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: alarm_handler
+### Description: Handles the alarm interrupt by performing context switching and scheduling
+
+alarm_handler:
+    ## Reset kernel's stack and frame pointers.
+    lw		fp,		kernel_limit
+    lw		sp,		kernel_limit
+
+    ## Save that we received an alarm
+    la		a0,		alarm_received_msg
+    call		print
+    
+    ## Save the current process's context and schedule the next process
+    call		scheduler_handle_alarm
+
+    ## If we get here, we should resume with a new process
+    ## context already loaded by scheduler_handle_alarm
+    eret
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: save_context
+### Description: Saves the current process context
+
+save_context:
+    ## Prologue
+    addi		sp,		sp,		-8
+    sw		ra,		4(sp)
+    sw		fp,		0(sp)
+    addi		fp,		sp,		8
+    
+    ## Save program counter from epc
+    csrr		t0,		epc
+    sw		t0,		saved_user_pc,	t6
+    
+    ## Save user stack and frame pointers (these will be in registers when we get here)
+    lw		t0,		RAM_limit		# User's stack top
+    sw		t0,		saved_user_sp,	t6
+    sw		t0,		saved_user_fp,	t6
+    
+    ## In a real implementation, we would save all user registers here
+    ## This is simplified since we're not doing full context switching yet
+    
+    ## Epilogue
+    lw		ra,		4(sp)
+    lw		fp,		0(sp)
+    addi		sp,		sp,		8
+    ret
+
+### ================================================================================================================================
+### Procedure: restore_context
+### Description: Restores a saved process context
+
+restore_context:
+    ## Prologue
+    addi		sp,		sp,		-8
+    sw		ra,		4(sp)
+    sw		fp,		0(sp)
+    addi		fp,		sp,		8
+    
+    ## Restore program counter to epc
+    lw		t0,		saved_user_pc
+    csrw		epc,		t0
+    
+    ## Restore user stack and frame pointers
+    lw		sp,		saved_user_sp
+    lw		fp,		saved_user_fp
+    
+    ## Reset the alarm for next quantum
+    lw		t0,		time_quantum
+    csrw		al,		t0
+    
+    ## In a real implementation, we would restore all user registers here
+    
+    ## Epilogue - don't restore sp/fp since we want user values
+    lw		ra,		4(sp)
+    addi		sp,		sp,		8
+    ret
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: scheduler_handle_alarm
+### Description: Handles scheduling when an alarm interrupts occurs
+
+scheduler_handle_alarm:
+    ## Prologue
+    addi		sp,		sp,		-8
+    sw		ra,		4(sp)
+    sw		fp,		0(sp)
+    addi		fp,		sp,		8
+    
+    ## Save the context of the current process
+    call		save_context
+    
+    ## In a real implementation with multiple processes:
+    ## 1. We would select the next process to run from a ready queue
+    ## 2. Update current_process to the next one
+    ## 3. Then restore its context
+    
+    ## For now, we'll just continue with the same process
+    call		restore_context
+    
+    ## Epilogue
+    lw		ra,		4(sp)
+    lw		fp,		0(sp)
+    addi		sp,		sp,		8
+    ret
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: int_to_dec
+### Parameters:
+###   [a0]: value -- The integer value to convert
+###   [a1]: buffer -- Pointer to buffer for the result string (should be at least 12 bytes)
+### Return value:
+###   <none>
+
+int_to_dec:
+    ## Prologue
+    addi		sp,		sp,		-16
+    sw		ra,		12(sp)
+    sw		fp,		8(sp)
+    sw		s0,		4(sp)
+    sw		s1,		0(sp)
+    addi		fp,		sp,		16
+    
+    ## Initialize locals
+    mv		s0,		a0		# s0 = value
+    mv		s1,		a1		# s1 = buffer
+    
+    ## Handle special case of zero
+    bnez		s0,		int_to_dec_nonzero
+    li		t0,		'0'
+    sb		t0,		0(s1)
+    sb		zero,		1(s1)		# Null terminator
+    j		int_to_dec_done
+    
+int_to_dec_nonzero:
+    ## First, find end of buffer to write backward
+    mv		t0,		s1		# t0 = current position
+    
+    ## Place null terminator
+    sb		zero,		0(t0)
+    addi		t0,		t0,		-1
+    
+    ## Handle negative numbers
+    bgez		s0,		int_to_dec_positive
+    neg		s0,		s0		# Make value positive
+    li		t1,		'-'
+    sb		t1,		0(s1)		# Put '-' sign at beginning
+    addi		s1,		s1,		1
+    
+int_to_dec_positive:
+    ## Extract digits from right to left
+int_to_dec_loop:
+    remu		t1,		s0,		10	# t1 = value % 10
+    addi		t1,		t1,		'0'	# Convert to ASCII
+    sb		t1,		0(t0)		# Store digit
+    addi		t0,		t0,		-1	# Move buffer position left
+    divu		s0,		s0,		10	# value /= 10
+    bnez		s0,		int_to_dec_loop	# Continue if value != 0
+    
+    ## Move result to beginning of buffer
+    addi		t0,		t0,		1	# Point to first digit
+    
+    ## If there's a gap between start of buffer and first digit, copy the string
+    beq		t0,		s1,		int_to_dec_done
+    
+int_to_dec_copy_loop:
+    lb		t1,		0(t0)		# Load character
+    sb		t1,		0(s1)		# Store at beginning
+    addi		t0,		t0,		1
+    addi		s1,		s1,		1
+    bnez		t1,		int_to_dec_copy_loop # Continue until null terminator
+    
+int_to_dec_done:
+    ## Epilogue
+    lw		s1,		0(sp)
+    lw		s0,		4(sp)
+    lw		fp,		8(sp)
+    lw		ra,		12(sp)
+    addi		sp,		sp,		16
+    ret
 ### ================================================================================================================================
 	.Code
 int_to_hex:
@@ -882,7 +1103,7 @@ hex_digits:
 	.Text
 	.ascii	"0123456789abcdef"
 kernel_L.str:
-	.asciz	"Initializing memory free list...\n"
+	.asciz	"Initializing RAM free block list...\n"
 free_list_head:
 	.Numeric
 	.word	0
@@ -901,3 +1122,1182 @@ kernel_L.str.4:
 	.asciz	"\n"
 kernel_L.str.5:
 	.asciz	"Running program...\n"
+	.Code
+enqueue:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -12(s0) 
+	sw	a1, -16(s0) 
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	bnez	a0, scheduler_LBB0_2 
+	j	scheduler_LBB0_1 
+scheduler_LBB0_1:
+	lw	a0, -16(s0) 
+	lw	a1, -12(s0) 
+	sw	a0, 0(a1) 
+	lw	a0, -16(s0) 
+	sw	a0, 148(a0) 
+	j	scheduler_LBB0_6 
+scheduler_LBB0_2:
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	sw	a0, -20(s0) 
+	j	scheduler_LBB0_3 
+scheduler_LBB0_3:
+	lw	a0, -20(s0) 
+	lw	a0, 148(a0) 
+	lw	a1, -12(s0) 
+	lw	a1, 0(a1) 
+	beq	a0, a1, scheduler_LBB0_5 
+	j	scheduler_LBB0_4 
+scheduler_LBB0_4:
+	lw	a0, -20(s0) 
+	lw	a0, 148(a0) 
+	sw	a0, -20(s0) 
+	j	scheduler_LBB0_3 
+scheduler_LBB0_5:
+	lw	a0, -16(s0) 
+	lw	a1, -20(s0) 
+	sw	a0, 148(a1) 
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	lw	a1, -16(s0) 
+	sw	a0, 148(a1) 
+	j	scheduler_LBB0_6 
+scheduler_LBB0_6:
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+scheduler_Lfunc_end0:
+	#	-- End function 
+dequeue:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -16(s0) 
+	lw	a0, -16(s0) 
+	lw	a0, 0(a0) 
+	bnez	a0, scheduler_LBB1_2 
+	j	scheduler_LBB1_1 
+scheduler_LBB1_1:
+	li	a0, 0 
+	sw	a0, -12(s0) 
+	j	scheduler_LBB1_9 
+scheduler_LBB1_2:
+	lw	a0, -16(s0) 
+	lw	a0, 0(a0) 
+	sw	a0, -20(s0) 
+	lw	a1, -20(s0) 
+	lw	a0, 148(a1) 
+	bne	a0, a1, scheduler_LBB1_4 
+	j	scheduler_LBB1_3 
+scheduler_LBB1_3:
+	lw	a1, -16(s0) 
+	li	a0, 0 
+	sw	a0, 0(a1) 
+	j	scheduler_LBB1_8 
+scheduler_LBB1_4:
+	lw	a0, -20(s0) 
+	sw	a0, -24(s0) 
+	j	scheduler_LBB1_5 
+scheduler_LBB1_5:
+	lw	a0, -24(s0) 
+	lw	a0, 148(a0) 
+	lw	a1, -20(s0) 
+	beq	a0, a1, scheduler_LBB1_7 
+	j	scheduler_LBB1_6 
+scheduler_LBB1_6:
+	lw	a0, -24(s0) 
+	lw	a0, 148(a0) 
+	sw	a0, -24(s0) 
+	j	scheduler_LBB1_5 
+scheduler_LBB1_7:
+	lw	a0, -20(s0) 
+	lw	a0, 148(a0) 
+	lw	a1, -16(s0) 
+	sw	a0, 0(a1) 
+	lw	a0, -16(s0) 
+	lw	a0, 0(a0) 
+	lw	a1, -24(s0) 
+	sw	a0, 148(a1) 
+	j	scheduler_LBB1_8 
+scheduler_LBB1_8:
+	lw	a1, -20(s0) 
+	li	a0, 0 
+	sw	a0, 148(a1) 
+	lw	a0, -20(s0) 
+	sw	a0, -12(s0) 
+	j	scheduler_LBB1_9 
+scheduler_LBB1_9:
+	lw	a0, -12(s0) 
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+scheduler_Lfunc_end1:
+	#	-- End function 
+scheduler_init:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+scheduler_autoL0:
+	auipc	a1, %hi(%pcrel(ready_queue))
+	li	a0, 0 
+	sw	a0, %lo(%larel(ready_queue,scheduler_autoL0))(a1)
+scheduler_autoL1:
+	auipc	a1, %hi(%pcrel(current_process))
+	sw	a0, %lo(%larel(current_process,scheduler_autoL1))(a1)
+scheduler_autoL2:
+	auipc	a1, %hi(%pcrel(next_pid))
+	li	a0, 1 
+	sw	a0, %lo(%larel(next_pid,scheduler_autoL2))(a1)
+scheduler_autoL3:
+	auipc	a0, %hi(%pcrel(time_quantum))
+	lw	a0, %lo(%larel(time_quantum,scheduler_autoL3))(a0)
+	bnez	a0, scheduler_LBB2_2 
+	j	scheduler_LBB2_1 
+scheduler_LBB2_1:
+scheduler_autoL4:
+	auipc	a1, %hi(%pcrel(time_quantum))
+	lui	a0, 2 
+	addi	a0, a0, 1808 
+	sw	a0, %lo(%larel(time_quantum,scheduler_autoL4))(a1)
+	j	scheduler_LBB2_2 
+scheduler_LBB2_2:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end2:
+	#	-- End function 
+scheduler_add_process:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -12(s0) 
+	sw	a1, -16(s0) 
+	sw	a2, -20(s0) 
+	li	a0, 152 
+	call	malloc 
+	sw	a0, -24(s0) 
+	lw	a0, -24(s0) 
+	bnez	a0, scheduler_LBB3_2 
+	j	scheduler_LBB3_1 
+scheduler_LBB3_1:
+	j	scheduler_LBB3_7 
+scheduler_LBB3_2:
+scheduler_autoL5:
+	auipc	a2, %hi(%pcrel(next_pid))
+	lw	a0, %lo(%larel(next_pid,scheduler_autoL5))(a2)
+	addi	a1, a0, 1 
+	sw	a1, %lo(%larel(next_pid,scheduler_autoL5))(a2)
+	lw	a1, -24(s0) 
+	sw	a0, 0(a1) 
+	lw	a1, -24(s0) 
+	li	a0, 0 
+	sw	a0, 4(a1) 
+	lw	a1, -12(s0) 
+	lw	a2, -24(s0) 
+	sw	a1, 136(a2) 
+	lw	a1, -16(s0) 
+	lw	a2, -24(s0) 
+	sw	a1, 140(a2) 
+	lw	a1, -20(s0) 
+	lw	a2, -24(s0) 
+	sw	a1, 144(a2) 
+	sw	a0, -28(s0) 
+	j	scheduler_LBB3_3 
+scheduler_LBB3_3:
+	lw	a1, -28(s0) 
+	li	a0, 31 
+	blt	a0, a1, scheduler_LBB3_6 
+	j	scheduler_LBB3_4 
+scheduler_LBB3_4:
+	lw	a0, -24(s0) 
+	lw	a1, -28(s0) 
+	slli	a1, a1, 2 
+	add	a1, a0, a1 
+	li	a0, 0 
+	sw	a0, 8(a1) 
+	j	scheduler_LBB3_5 
+scheduler_LBB3_5:
+	lw	a0, -28(s0) 
+	addi	a0, a0, 1 
+	sw	a0, -28(s0) 
+	j	scheduler_LBB3_3 
+scheduler_LBB3_6:
+	lw	a1, -24(s0) 
+scheduler_autoL6:
+	auipc	a0, %hi(%pcrel(ready_queue))
+	addi	a0, a0, %lo(%larel(ready_queue,scheduler_autoL6))
+	call	enqueue 
+	j	scheduler_LBB3_7 
+scheduler_LBB3_7:
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+scheduler_Lfunc_end3:
+	#	-- End function 
+scheduler_get_current_process:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+scheduler_autoL7:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a0, %lo(%larel(current_process,scheduler_autoL7))(a0)
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end4:
+	#	-- End function 
+scheduler_get_next_process:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+scheduler_autoL8:
+	auipc	a0, %hi(%pcrel(ready_queue))
+	lw	a0, %lo(%larel(ready_queue,scheduler_autoL8))(a0)
+	bnez	a0, scheduler_LBB5_2 
+	j	scheduler_LBB5_1 
+scheduler_LBB5_1:
+	li	a0, 0 
+	sw	a0, -12(s0) 
+	j	scheduler_LBB5_6 
+scheduler_LBB5_2:
+scheduler_autoL9:
+	auipc	a0, %hi(%pcrel(ready_queue))
+	addi	a0, a0, %lo(%larel(ready_queue,scheduler_autoL9))
+	call	dequeue 
+	sw	a0, -16(s0) 
+	lw	a1, -16(s0) 
+	li	a0, 1 
+	sw	a0, 4(a1) 
+scheduler_autoL10:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a0, %lo(%larel(current_process,scheduler_autoL10))(a0)
+	beqz	a0, scheduler_LBB5_5 
+	j	scheduler_LBB5_3 
+scheduler_LBB5_3:
+scheduler_autoL11:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a0, %lo(%larel(current_process,scheduler_autoL11))(a0)
+	lw	a0, 4(a0) 
+	li	a1, 1 
+	bne	a0, a1, scheduler_LBB5_5 
+	j	scheduler_LBB5_4 
+scheduler_LBB5_4:
+scheduler_autoL12:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a2, %lo(%larel(current_process,scheduler_autoL12))(a0)
+	li	a1, 0 
+	sw	a1, 4(a2) 
+	lw	a1, %lo(%larel(current_process,scheduler_autoL12))(a0)
+scheduler_autoL13:
+	auipc	a0, %hi(%pcrel(ready_queue))
+	addi	a0, a0, %lo(%larel(ready_queue,scheduler_autoL13))
+	call	enqueue 
+	j	scheduler_LBB5_5 
+scheduler_LBB5_5:
+	lw	a0, -16(s0) 
+	sw	a0, -12(s0) 
+	j	scheduler_LBB5_6 
+scheduler_LBB5_6:
+	lw	a0, -12(s0) 
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end5:
+	#	-- End function 
+save_context:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+scheduler_autoL14:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a0, %lo(%larel(current_process,scheduler_autoL14))(a0)
+	bnez	a0, scheduler_LBB6_2 
+	j	scheduler_LBB6_1 
+scheduler_LBB6_1:
+	j	scheduler_LBB6_6 
+scheduler_LBB6_2:
+scheduler_autoL15:
+	auipc	a0, %hi(%pcrel(saved_user_pc))
+	lw	a0, %lo(%larel(saved_user_pc,scheduler_autoL15))(a0)
+scheduler_autoL16:
+	auipc	a1, %hi(%pcrel(current_process))
+	lw	a2, %lo(%larel(current_process,scheduler_autoL16))(a1)
+	sw	a0, 136(a2) 
+scheduler_autoL17:
+	auipc	a0, %hi(%pcrel(saved_user_sp))
+	lw	a0, %lo(%larel(saved_user_sp,scheduler_autoL17))(a0)
+	lw	a2, %lo(%larel(current_process,scheduler_autoL16))(a1)
+	sw	a0, 140(a2) 
+scheduler_autoL18:
+	auipc	a0, %hi(%pcrel(saved_user_fp))
+	lw	a0, %lo(%larel(saved_user_fp,scheduler_autoL18))(a0)
+	lw	a1, %lo(%larel(current_process,scheduler_autoL16))(a1)
+	sw	a0, 144(a1) 
+	li	a0, 0 
+	sw	a0, -12(s0) 
+	j	scheduler_LBB6_3 
+scheduler_LBB6_3:
+	lw	a1, -12(s0) 
+	li	a0, 31 
+	blt	a0, a1, scheduler_LBB6_6 
+	j	scheduler_LBB6_4 
+scheduler_LBB6_4:
+	lw	a0, -12(s0) 
+	slli	a2, a0, 2 
+scheduler_autoL19:
+	auipc	a0, %hi(%pcrel(saved_registers))
+	addi	a0, a0, %lo(%larel(saved_registers,scheduler_autoL19))
+	add	a0, a0, a2 
+	lw	a0, 0(a0) 
+scheduler_autoL20:
+	auipc	a1, %hi(%pcrel(current_process))
+	lw	a1, %lo(%larel(current_process,scheduler_autoL20))(a1)
+	add	a1, a1, a2 
+	sw	a0, 8(a1) 
+	j	scheduler_LBB6_5 
+scheduler_LBB6_5:
+	lw	a0, -12(s0) 
+	addi	a0, a0, 1 
+	sw	a0, -12(s0) 
+	j	scheduler_LBB6_3 
+scheduler_LBB6_6:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end6:
+	#	-- End function 
+restore_context:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+	sw	a0, -12(s0) 
+	lw	a0, -12(s0) 
+	bnez	a0, scheduler_LBB7_2 
+	j	scheduler_LBB7_1 
+scheduler_LBB7_1:
+	j	scheduler_LBB7_6 
+scheduler_LBB7_2:
+	lw	a0, -12(s0) 
+	lw	a0, 136(a0) 
+scheduler_autoL21:
+	auipc	a1, %hi(%pcrel(saved_user_pc))
+	sw	a0, %lo(%larel(saved_user_pc,scheduler_autoL21))(a1)
+	lw	a0, -12(s0) 
+	lw	a0, 140(a0) 
+scheduler_autoL22:
+	auipc	a1, %hi(%pcrel(saved_user_sp))
+	sw	a0, %lo(%larel(saved_user_sp,scheduler_autoL22))(a1)
+	lw	a0, -12(s0) 
+	lw	a0, 144(a0) 
+scheduler_autoL23:
+	auipc	a1, %hi(%pcrel(saved_user_fp))
+	sw	a0, %lo(%larel(saved_user_fp,scheduler_autoL23))(a1)
+	li	a0, 0 
+	sw	a0, -16(s0) 
+	j	scheduler_LBB7_3 
+scheduler_LBB7_3:
+	lw	a1, -16(s0) 
+	li	a0, 31 
+	blt	a0, a1, scheduler_LBB7_6 
+	j	scheduler_LBB7_4 
+scheduler_LBB7_4:
+	lw	a0, -12(s0) 
+	lw	a1, -16(s0) 
+	slli	a2, a1, 2 
+	add	a0, a0, a2 
+	lw	a0, 8(a0) 
+scheduler_autoL24:
+	auipc	a1, %hi(%pcrel(saved_registers))
+	addi	a1, a1, %lo(%larel(saved_registers,scheduler_autoL24))
+	add	a1, a1, a2 
+	sw	a0, 0(a1) 
+	j	scheduler_LBB7_5 
+scheduler_LBB7_5:
+	lw	a0, -16(s0) 
+	addi	a0, a0, 1 
+	sw	a0, -16(s0) 
+	j	scheduler_LBB7_3 
+scheduler_LBB7_6:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end7:
+	#	-- End function 
+context_switch:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+	call	save_context 
+	call	scheduler_get_next_process 
+	sw	a0, -12(s0) 
+	lw	a0, -12(s0) 
+	bnez	a0, scheduler_LBB8_2 
+	j	scheduler_LBB8_1 
+scheduler_LBB8_1:
+	j	scheduler_LBB8_3 
+scheduler_LBB8_2:
+	lw	a1, -12(s0) 
+scheduler_autoL25:
+	auipc	a0, %hi(%pcrel(current_process))
+	sw	a1, %lo(%larel(current_process,scheduler_autoL25))(a0)
+	lw	a0, %lo(%larel(current_process,scheduler_autoL25))(a0)
+	call	restore_context 
+	j	scheduler_LBB8_3 
+scheduler_LBB8_3:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end8:
+	#	-- End function 
+scheduler_handle_alarm:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+scheduler_autoL26:
+	auipc	a0, %hi(%pcrel(ready_queue))
+	lw	a0, %lo(%larel(ready_queue,scheduler_autoL26))(a0)
+	bnez	a0, scheduler_LBB9_3 
+	j	scheduler_LBB9_1 
+scheduler_LBB9_1:
+scheduler_autoL27:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a0, %lo(%larel(current_process,scheduler_autoL27))(a0)
+	bnez	a0, scheduler_LBB9_3 
+	j	scheduler_LBB9_2 
+scheduler_LBB9_2:
+	j	scheduler_LBB9_4 
+scheduler_LBB9_3:
+	call	context_switch 
+	j	scheduler_LBB9_4 
+scheduler_LBB9_4:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end9:
+	#	-- End function 
+scheduler_terminate_current:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+scheduler_autoL28:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a0, %lo(%larel(current_process,scheduler_autoL28))(a0)
+	bnez	a0, scheduler_LBB10_2 
+	j	scheduler_LBB10_1 
+scheduler_LBB10_1:
+	j	scheduler_LBB10_6 
+scheduler_LBB10_2:
+scheduler_autoL29:
+	auipc	a0, %hi(%pcrel(current_process))
+	lw	a2, %lo(%larel(current_process,scheduler_autoL29))(a0)
+	li	a1, 3 
+	sw	a1, 4(a2) 
+	lw	a0, %lo(%larel(current_process,scheduler_autoL29))(a0)
+	sw	a0, -12(s0) 
+	call	scheduler_get_next_process 
+	sw	a0, -16(s0) 
+	lw	a0, -16(s0) 
+	bnez	a0, scheduler_LBB10_4 
+	j	scheduler_LBB10_3 
+scheduler_LBB10_3:
+scheduler_autoL30:
+	auipc	a1, %hi(%pcrel(current_process))
+	li	a0, 0 
+	sw	a0, %lo(%larel(current_process,scheduler_autoL30))(a1)
+	j	scheduler_LBB10_5 
+scheduler_LBB10_4:
+	lw	a1, -16(s0) 
+scheduler_autoL31:
+	auipc	a0, %hi(%pcrel(current_process))
+	sw	a1, %lo(%larel(current_process,scheduler_autoL31))(a0)
+	lw	a0, %lo(%larel(current_process,scheduler_autoL31))(a0)
+	call	restore_context 
+	j	scheduler_LBB10_5 
+scheduler_LBB10_5:
+	lw	a0, -12(s0) 
+	call	free 
+	j	scheduler_LBB10_6 
+scheduler_LBB10_6:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+scheduler_Lfunc_end10:
+	#	-- End function 
+ready_queue:
+	.Numeric
+	.word	0
+current_process:
+	.word	0
+next_pid:
+	.word	1                               # 0x1
+	.Code
+insert_process:
+	#	%bb.0: 
+	addi	sp, sp, -48 
+	sw	ra, 44(sp) # 4-byte Folded Spill 
+	sw	s0, 40(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 48 
+	sw	a0, -12(s0) 
+	sw	a1, -16(s0) 
+	sw	a2, -20(s0) 
+	sw	a3, -24(s0) 
+	sw	a4, -28(s0) 
+	li	a0, 72 
+	call	malloc 
+	sw	a0, -32(s0) 
+	lw	a0, -32(s0) 
+	bnez	a0, process_info_LBB0_2 
+	j	process_info_LBB0_1 
+process_info_LBB0_1:
+	j	process_info_LBB0_5 
+process_info_LBB0_2:
+	lw	a0, -16(s0) 
+	lw	a1, -32(s0) 
+	sw	a0, 0(a1) 
+	lw	a0, -32(s0) 
+	addi	a0, a0, 4 
+	lw	a1, -20(s0) 
+	li	a2, 50 
+	call	my_strncpy 
+	lw	a0, -24(s0) 
+	lw	a1, -32(s0) 
+	sw	a0, 56(a1) 
+	lw	a0, -28(s0) 
+	lw	a1, -32(s0) 
+	sw	a0, 60(a1) 
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	bnez	a0, process_info_LBB0_4 
+	j	process_info_LBB0_3 
+process_info_LBB0_3:
+	lw	a0, -32(s0) 
+	sw	a0, 64(a0) 
+	lw	a0, -32(s0) 
+	sw	a0, 68(a0) 
+	lw	a0, -32(s0) 
+	lw	a1, -12(s0) 
+	sw	a0, 0(a1) 
+	j	process_info_LBB0_5 
+process_info_LBB0_4:
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	lw	a0, 68(a0) 
+	sw	a0, -36(s0) 
+	lw	a0, -32(s0) 
+	lw	a1, -36(s0) 
+	sw	a0, 64(a1) 
+	lw	a0, -36(s0) 
+	lw	a1, -32(s0) 
+	sw	a0, 68(a1) 
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	lw	a1, -32(s0) 
+	sw	a0, 64(a1) 
+	lw	a0, -32(s0) 
+	lw	a1, -12(s0) 
+	lw	a1, 0(a1) 
+	sw	a0, 68(a1) 
+	j	process_info_LBB0_5 
+process_info_LBB0_5:
+	lw	ra, 44(sp) # 4-byte Folded Reload 
+	lw	s0, 40(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 48 
+	ret	
+process_info_Lfunc_end0:
+	#	-- End function 
+my_strncpy:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -12(s0) 
+	sw	a1, -16(s0) 
+	sw	a2, -20(s0) 
+	li	a0, 0 
+	sw	a0, -24(s0) 
+	j	process_info_LBB1_1 
+process_info_LBB1_1:
+	lw	a0, -24(s0) 
+	lw	a1, -20(s0) 
+	addi	a1, a1, -1 
+	li	a2, 0 
+	sw	a2, -28(s0) # 4-byte Folded Spill 
+	bge	a0, a1, process_info_LBB1_3 
+	j	process_info_LBB1_2 
+process_info_LBB1_2:
+	lw	a0, -16(s0) 
+	lw	a1, -24(s0) 
+	add	a0, a0, a1 
+	lbu	a0, 0(a0) 
+	snez	a0, a0 
+	sw	a0, -28(s0) # 4-byte Folded Spill 
+	j	process_info_LBB1_3 
+process_info_LBB1_3:
+	lw	a0, -28(s0) # 4-byte Folded Reload 
+	andi	a0, a0, 1 
+	beqz	a0, process_info_LBB1_6 
+	j	process_info_LBB1_4 
+process_info_LBB1_4:
+	lw	a0, -16(s0) 
+	lw	a2, -24(s0) 
+	add	a0, a0, a2 
+	lbu	a0, 0(a0) 
+	lw	a1, -12(s0) 
+	add	a1, a1, a2 
+	sb	a0, 0(a1) 
+	j	process_info_LBB1_5 
+process_info_LBB1_5:
+	lw	a0, -24(s0) 
+	addi	a0, a0, 1 
+	sw	a0, -24(s0) 
+	j	process_info_LBB1_1 
+process_info_LBB1_6:
+	lw	a0, -12(s0) 
+	lw	a1, -24(s0) 
+	add	a1, a0, a1 
+	li	a0, 0 
+	sb	a0, 0(a1) 
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+process_info_Lfunc_end1:
+	#	-- End function 
+delete_process:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -12(s0) 
+	sw	a1, -16(s0) 
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	bnez	a0, process_info_LBB2_2 
+	j	process_info_LBB2_1 
+process_info_LBB2_1:
+	j	process_info_LBB2_11 
+process_info_LBB2_2:
+	lw	a0, -12(s0) 
+	lw	a0, 0(a0) 
+	sw	a0, -20(s0) 
+	j	process_info_LBB2_3 
+process_info_LBB2_3:
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+	lw	a1, -16(s0) 
+	bne	a0, a1, process_info_LBB2_9 
+	j	process_info_LBB2_4 
+process_info_LBB2_4:
+	lw	a1, -20(s0) 
+	lw	a0, 64(a1) 
+	bne	a0, a1, process_info_LBB2_6 
+	j	process_info_LBB2_5 
+process_info_LBB2_5:
+	lw	a0, -20(s0) 
+	call	free 
+	lw	a1, -12(s0) 
+	li	a0, 0 
+	sw	a0, 0(a1) 
+	j	process_info_LBB2_11 
+process_info_LBB2_6:
+	lw	a0, -20(s0) 
+	lw	a0, 68(a0) 
+	sw	a0, -24(s0) 
+	lw	a0, -20(s0) 
+	lw	a0, 64(a0) 
+	sw	a0, -28(s0) 
+	lw	a0, -28(s0) 
+	lw	a1, -24(s0) 
+	sw	a0, 64(a1) 
+	lw	a0, -24(s0) 
+	lw	a1, -28(s0) 
+	sw	a0, 68(a1) 
+	lw	a0, -20(s0) 
+	lw	a1, -12(s0) 
+	lw	a1, 0(a1) 
+	bne	a0, a1, process_info_LBB2_8 
+	j	process_info_LBB2_7 
+process_info_LBB2_7:
+	lw	a0, -28(s0) 
+	lw	a1, -12(s0) 
+	sw	a0, 0(a1) 
+	j	process_info_LBB2_8 
+process_info_LBB2_8:
+	lw	a0, -20(s0) 
+	call	free 
+	j	process_info_LBB2_11 
+process_info_LBB2_9:
+	lw	a0, -20(s0) 
+	lw	a0, 64(a0) 
+	sw	a0, -20(s0) 
+	j	process_info_LBB2_10 
+process_info_LBB2_10:
+	lw	a0, -20(s0) 
+	lw	a1, -12(s0) 
+	lw	a1, 0(a1) 
+	bne	a0, a1, process_info_LBB2_3 
+	j	process_info_LBB2_11 
+process_info_LBB2_11:
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+process_info_Lfunc_end2:
+	#	-- End function 
+display_processes:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+	sw	a0, -12(s0) 
+	lw	a0, -12(s0) 
+	bnez	a0, process_info_LBB3_2 
+	j	process_info_LBB3_1 
+process_info_LBB3_1:
+	j	process_info_LBB3_5 
+process_info_LBB3_2:
+	lw	a0, -12(s0) 
+	sw	a0, -16(s0) 
+	j	process_info_LBB3_3 
+process_info_LBB3_3:
+	lw	a0, -16(s0) 
+	lw	a0, 64(a0) 
+	sw	a0, -16(s0) 
+	j	process_info_LBB3_4 
+process_info_LBB3_4:
+	lw	a0, -16(s0) 
+	lw	a1, -12(s0) 
+	bne	a0, a1, process_info_LBB3_3 
+	j	process_info_LBB3_5 
+process_info_LBB3_5:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+process_info_Lfunc_end3:
+	#	-- End function 
+	.Code
+malloc:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+	sw	a0, -16(s0) 
+	lw	a0, -16(s0) 
+	bnez	a0, memory-alloc_LBB0_2 
+	j	memory-alloc_LBB0_1 
+memory-alloc_LBB0_1:
+	li	a0, 0 
+	sw	a0, -12(s0) 
+	j	memory-alloc_LBB0_3 
+memory-alloc_LBB0_2:
+	lw	a0, -16(s0) 
+	call	allocate 
+	sw	a0, -12(s0) 
+	j	memory-alloc_LBB0_3 
+memory-alloc_LBB0_3:
+	lw	a0, -12(s0) 
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+memory-alloc_Lfunc_end0:
+	#	-- End function 
+free:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+	sw	a0, -12(s0) 
+	lw	a0, -12(s0) 
+	call	deallocate 
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+memory-alloc_Lfunc_end1:
+	#	-- End function 
+	.Code
+heap_init:
+	#	%bb.0: 
+	addi	sp, sp, -16 
+	sw	ra, 12(sp) # 4-byte Folded Spill 
+	sw	s0, 8(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 16 
+heap-alloc_autoL0:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL0))(a0)
+	beqz	a0, heap-alloc_LBB0_2 
+	j	heap-alloc_LBB0_1 
+heap-alloc_LBB0_1:
+	j	heap-alloc_LBB0_5 
+heap-alloc_LBB0_2:
+heap-alloc_autoL1:
+	auipc	a0, %hi(%pcrel(heap_space))
+	addi	a0, a0, %lo(%larel(heap_space,heap-alloc_autoL1))
+	sw	a0, -12(s0) 
+	lw	a1, -12(s0) 
+	lui	a0, 256 
+	addi	a0, a0, -12 
+	sw	a0, 8(a1) 
+	lw	a0, -12(s0) 
+	li	a1, 0 
+	sw	a1, 0(a0) 
+	lw	a0, -12(s0) 
+	sw	a1, 4(a0) 
+heap-alloc_autoL2:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a2, %lo(%larel(free_blocks,heap-alloc_autoL2))(a0)
+	lw	a3, -12(s0) 
+	sw	a2, 0(a3) 
+	lw	a2, -12(s0) 
+	sw	a1, 4(a2) 
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL2))(a0)
+	beqz	a0, heap-alloc_LBB0_4 
+	j	heap-alloc_LBB0_3 
+heap-alloc_LBB0_3:
+	lw	a0, -12(s0) 
+heap-alloc_autoL3:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	lw	a1, %lo(%larel(free_blocks,heap-alloc_autoL3))(a1)
+	sw	a0, 4(a1) 
+	j	heap-alloc_LBB0_4 
+heap-alloc_LBB0_4:
+	lw	a0, -12(s0) 
+heap-alloc_autoL4:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	sw	a0, %lo(%larel(free_blocks,heap-alloc_autoL4))(a1)
+	j	heap-alloc_LBB0_5 
+heap-alloc_LBB0_5:
+	lw	ra, 12(sp) # 4-byte Folded Reload 
+	lw	s0, 8(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 16 
+	ret	
+heap-alloc_Lfunc_end0:
+	#	-- End function 
+allocate:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -16(s0) 
+	call	heap_init 
+	lw	a0, -16(s0) 
+	addi	a0, a0, 3 
+	andi	a0, a0, -4 
+	sw	a0, -16(s0) 
+heap-alloc_autoL5:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL5))(a0)
+	sw	a0, -20(s0) 
+	j	heap-alloc_LBB1_1 
+heap-alloc_LBB1_1:
+	lw	a0, -20(s0) 
+	beqz	a0, heap-alloc_LBB1_14 
+	j	heap-alloc_LBB1_2 
+heap-alloc_LBB1_2:
+	lw	a0, -20(s0) 
+	lw	a0, 8(a0) 
+	lw	a1, -16(s0) 
+	bltu	a0, a1, heap-alloc_LBB1_13 
+	j	heap-alloc_LBB1_3 
+heap-alloc_LBB1_3:
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+	beqz	a0, heap-alloc_LBB1_5 
+	j	heap-alloc_LBB1_4 
+heap-alloc_LBB1_4:
+	lw	a1, -20(s0) 
+	lw	a0, 4(a1) 
+	lw	a1, 0(a1) 
+	sw	a0, 4(a1) 
+	j	heap-alloc_LBB1_5 
+heap-alloc_LBB1_5:
+	lw	a0, -20(s0) 
+	lw	a0, 4(a0) 
+	beqz	a0, heap-alloc_LBB1_7 
+	j	heap-alloc_LBB1_6 
+heap-alloc_LBB1_6:
+	lw	a1, -20(s0) 
+	lw	a0, 0(a1) 
+	lw	a1, 4(a1) 
+	sw	a0, 0(a1) 
+	j	heap-alloc_LBB1_8 
+heap-alloc_LBB1_7:
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+heap-alloc_autoL6:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	sw	a0, %lo(%larel(free_blocks,heap-alloc_autoL6))(a1)
+	j	heap-alloc_LBB1_8 
+heap-alloc_LBB1_8:
+	lw	a0, -20(s0) 
+	lw	a1, 8(a0) 
+	lw	a0, -16(s0) 
+	addi	a0, a0, 12 
+	bgeu	a0, a1, heap-alloc_LBB1_12 
+	j	heap-alloc_LBB1_9 
+heap-alloc_LBB1_9:
+	lw	a0, -20(s0) 
+	lw	a1, -16(s0) 
+	add	a0, a0, a1 
+	addi	a0, a0, 12 
+	sw	a0, -24(s0) 
+	lw	a0, -24(s0) 
+	sw	a0, -28(s0) 
+	lw	a0, -28(s0) 
+	li	a1, 0 
+	sw	a1, 0(a0) 
+	lw	a0, -28(s0) 
+	sw	a1, 4(a0) 
+	lw	a0, -20(s0) 
+	lw	a0, 8(a0) 
+	lw	a2, -16(s0) 
+	sub	a0, a0, a2 
+	addi	a0, a0, -12 
+	lw	a2, -28(s0) 
+	sw	a0, 8(a2) 
+	lw	a0, -16(s0) 
+	lw	a2, -20(s0) 
+	sw	a0, 8(a2) 
+heap-alloc_autoL7:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a2, %lo(%larel(free_blocks,heap-alloc_autoL7))(a0)
+	lw	a3, -28(s0) 
+	sw	a2, 0(a3) 
+	lw	a2, -28(s0) 
+	sw	a1, 4(a2) 
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL7))(a0)
+	beqz	a0, heap-alloc_LBB1_11 
+	j	heap-alloc_LBB1_10 
+heap-alloc_LBB1_10:
+	lw	a0, -28(s0) 
+heap-alloc_autoL8:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	lw	a1, %lo(%larel(free_blocks,heap-alloc_autoL8))(a1)
+	sw	a0, 4(a1) 
+	j	heap-alloc_LBB1_11 
+heap-alloc_LBB1_11:
+	lw	a0, -28(s0) 
+heap-alloc_autoL9:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	sw	a0, %lo(%larel(free_blocks,heap-alloc_autoL9))(a1)
+	j	heap-alloc_LBB1_12 
+heap-alloc_LBB1_12:
+	lw	a0, -20(s0) 
+	addi	a0, a0, 12 
+	sw	a0, -12(s0) 
+	j	heap-alloc_LBB1_15 
+heap-alloc_LBB1_13:
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+	sw	a0, -20(s0) 
+	j	heap-alloc_LBB1_1 
+heap-alloc_LBB1_14:
+	li	a0, 0 
+	sw	a0, -12(s0) 
+	j	heap-alloc_LBB1_15 
+heap-alloc_LBB1_15:
+	lw	a0, -12(s0) 
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+heap-alloc_Lfunc_end1:
+	#	-- End function 
+deallocate:
+	#	%bb.0: 
+	addi	sp, sp, -32 
+	sw	ra, 28(sp) # 4-byte Folded Spill 
+	sw	s0, 24(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 32 
+	sw	a0, -12(s0) 
+	lw	a0, -12(s0) 
+	bnez	a0, heap-alloc_LBB2_2 
+	j	heap-alloc_LBB2_1 
+heap-alloc_LBB2_1:
+	j	heap-alloc_LBB2_20 
+heap-alloc_LBB2_2:
+	lw	a0, -12(s0) 
+	addi	a0, a0, -12 
+	sw	a0, -16(s0) 
+heap-alloc_autoL10:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL10))(a0)
+	sw	a0, -20(s0) 
+	j	heap-alloc_LBB2_3 
+heap-alloc_LBB2_3:
+	lw	a0, -20(s0) 
+	beqz	a0, heap-alloc_LBB2_17 
+	j	heap-alloc_LBB2_4 
+heap-alloc_LBB2_4:
+	lw	a0, -20(s0) 
+	lw	a1, 8(a0) 
+	add	a0, a0, a1 
+	addi	a0, a0, 12 
+	lw	a1, -16(s0) 
+	bne	a0, a1, heap-alloc_LBB2_6 
+	j	heap-alloc_LBB2_5 
+heap-alloc_LBB2_5:
+	lw	a0, -16(s0) 
+	lw	a0, 8(a0) 
+	lw	a1, -20(s0) 
+	lw	a2, 8(a1) 
+	add	a0, a0, a2 
+	addi	a0, a0, 12 
+	sw	a0, 8(a1) 
+	j	heap-alloc_LBB2_20 
+heap-alloc_LBB2_6:
+	lw	a0, -16(s0) 
+	lw	a1, 8(a0) 
+	add	a0, a0, a1 
+	addi	a0, a0, 12 
+	lw	a1, -20(s0) 
+	bne	a0, a1, heap-alloc_LBB2_15 
+	j	heap-alloc_LBB2_7 
+heap-alloc_LBB2_7:
+	lw	a0, -20(s0) 
+	lw	a0, 8(a0) 
+	lw	a1, -16(s0) 
+	lw	a2, 8(a1) 
+	add	a0, a0, a2 
+	addi	a0, a0, 12 
+	sw	a0, 8(a1) 
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+	beqz	a0, heap-alloc_LBB2_9 
+	j	heap-alloc_LBB2_8 
+heap-alloc_LBB2_8:
+	lw	a1, -20(s0) 
+	lw	a0, 4(a1) 
+	lw	a1, 0(a1) 
+	sw	a0, 4(a1) 
+	j	heap-alloc_LBB2_9 
+heap-alloc_LBB2_9:
+	lw	a0, -20(s0) 
+	lw	a0, 4(a0) 
+	beqz	a0, heap-alloc_LBB2_11 
+	j	heap-alloc_LBB2_10 
+heap-alloc_LBB2_10:
+	lw	a1, -20(s0) 
+	lw	a0, 0(a1) 
+	lw	a1, 4(a1) 
+	sw	a0, 0(a1) 
+	j	heap-alloc_LBB2_12 
+heap-alloc_LBB2_11:
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+heap-alloc_autoL11:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	sw	a0, %lo(%larel(free_blocks,heap-alloc_autoL11))(a1)
+	j	heap-alloc_LBB2_12 
+heap-alloc_LBB2_12:
+heap-alloc_autoL12:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a1, %lo(%larel(free_blocks,heap-alloc_autoL12))(a0)
+	lw	a2, -16(s0) 
+	sw	a1, 0(a2) 
+	lw	a2, -16(s0) 
+	li	a1, 0 
+	sw	a1, 4(a2) 
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL12))(a0)
+	beqz	a0, heap-alloc_LBB2_14 
+	j	heap-alloc_LBB2_13 
+heap-alloc_LBB2_13:
+	lw	a0, -16(s0) 
+heap-alloc_autoL13:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	lw	a1, %lo(%larel(free_blocks,heap-alloc_autoL13))(a1)
+	sw	a0, 4(a1) 
+	j	heap-alloc_LBB2_14 
+heap-alloc_LBB2_14:
+	lw	a0, -16(s0) 
+heap-alloc_autoL14:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	sw	a0, %lo(%larel(free_blocks,heap-alloc_autoL14))(a1)
+	j	heap-alloc_LBB2_20 
+heap-alloc_LBB2_15:
+	j	heap-alloc_LBB2_16 
+heap-alloc_LBB2_16:
+	lw	a0, -20(s0) 
+	lw	a0, 0(a0) 
+	sw	a0, -20(s0) 
+	j	heap-alloc_LBB2_3 
+heap-alloc_LBB2_17:
+heap-alloc_autoL15:
+	auipc	a0, %hi(%pcrel(free_blocks))
+	lw	a1, %lo(%larel(free_blocks,heap-alloc_autoL15))(a0)
+	lw	a2, -16(s0) 
+	sw	a1, 0(a2) 
+	lw	a2, -16(s0) 
+	li	a1, 0 
+	sw	a1, 4(a2) 
+	lw	a0, %lo(%larel(free_blocks,heap-alloc_autoL15))(a0)
+	beqz	a0, heap-alloc_LBB2_19 
+	j	heap-alloc_LBB2_18 
+heap-alloc_LBB2_18:
+	lw	a0, -16(s0) 
+heap-alloc_autoL16:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	lw	a1, %lo(%larel(free_blocks,heap-alloc_autoL16))(a1)
+	sw	a0, 4(a1) 
+	j	heap-alloc_LBB2_19 
+heap-alloc_LBB2_19:
+	lw	a0, -16(s0) 
+heap-alloc_autoL17:
+	auipc	a1, %hi(%pcrel(free_blocks))
+	sw	a0, %lo(%larel(free_blocks,heap-alloc_autoL17))(a1)
+	j	heap-alloc_LBB2_20 
+heap-alloc_LBB2_20:
+	lw	ra, 28(sp) # 4-byte Folded Reload 
+	lw	s0, 24(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 32 
+	ret	
+heap-alloc_Lfunc_end2:
+	#	-- End function 
+free_blocks:
+	.Numeric
+	.word	0

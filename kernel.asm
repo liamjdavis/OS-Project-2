@@ -198,7 +198,7 @@ hex_digits:
 	.Text
 	.ascii	"0123456789abcdef"
 kernel_L.str:
-	.asciz	"Initializing memory free list...\n"
+	.asciz	"Initializing RAM free block list...\n"
 free_list_head:
 	.Numeric
 	.word	0
