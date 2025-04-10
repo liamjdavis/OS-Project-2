@@ -126,10 +126,10 @@ kernel_Lfunc_end1:
 	#	-- End function 
 run_programs:
 	#	%bb.0: 
-	addi	sp, sp, -32 
-	sw	ra, 28(sp) # 4-byte Folded Spill 
-	sw	s0, 24(sp) # 4-byte Folded Spill 
-	addi	s0, sp, 32 
+	addi	sp, sp, -48 
+	sw	ra, 44(sp) # 4-byte Folded Spill 
+	sw	s0, 40(sp) # 4-byte Folded Spill 
+	addi	s0, sp, 48 
 kernel_autoL6:
 	auipc	a0, %hi(%pcrel(kernel_L.str.3))
 	addi	a0, a0, %lo(%larel(kernel_L.str.3,kernel_autoL6))
@@ -160,36 +160,73 @@ kernel_autoL9:
 	bnez	a0, kernel_LBB2_2 
 	j	kernel_LBB2_1 
 kernel_LBB2_1:
-	j	kernel_LBB2_3 
+	j	kernel_LBB2_5 
 kernel_LBB2_2:
 kernel_autoL10:
+	auipc	a0, %hi(%pcrel(scheduler_active))
+	lw	a0, %lo(%larel(scheduler_active,kernel_autoL10))(a0)
+	bnez	a0, kernel_LBB2_4 
+	j	kernel_LBB2_3 
+kernel_LBB2_3:
+kernel_autoL11:
 	auipc	a0, %hi(%pcrel(kernel_L.str.5))
-	addi	a0, a0, %lo(%larel(kernel_L.str.5,kernel_autoL10))
+	addi	a0, a0, %lo(%larel(kernel_L.str.5,kernel_autoL11))
+	call	print 
+	call	scheduler_init 
+kernel_autoL12:
+	auipc	a0, %hi(%pcrel(scheduler_start_msg))
+	lw	a0, %lo(%larel(scheduler_start_msg,kernel_autoL12))(a0)
+	call	print 
+kernel_autoL13:
+	auipc	a0, %hi(%pcrel(time_quantum))
+	lw	a0, %lo(%larel(time_quantum,kernel_autoL13))(a0)
+	addi	a1, s0, -17 
+	sw	a1, -36(s0) # 4-byte Folded Spill 
+	call	int_to_hex 
+	lw	a0, -36(s0) # 4-byte Folded Reload 
+	call	print 
+kernel_autoL14:
+	auipc	a0, %hi(%pcrel(scheduler_cycles_msg))
+	lw	a0, %lo(%larel(scheduler_cycles_msg,kernel_autoL14))(a0)
+	call	print 
+	j	kernel_LBB2_4 
+kernel_LBB2_4:
+kernel_autoL15:
+	auipc	a0, %hi(%pcrel(kernel_L.str.6))
+	addi	a0, a0, %lo(%larel(kernel_L.str.6,kernel_autoL15))
 	call	print 
 	lw	a0, -24(s0) 
 	lw	a0, 4(a0) 
-kernel_autoL11:
+kernel_autoL16:
 	auipc	a2, %hi(%pcrel(DMA_portal_ptr))
-	lw	a1, %lo(%larel(DMA_portal_ptr,kernel_autoL11))(a2)
+	lw	a1, %lo(%larel(DMA_portal_ptr,kernel_autoL16))(a2)
 	sw	a0, 0(a1) 
-kernel_autoL12:
+kernel_autoL17:
 	auipc	a0, %hi(%pcrel(kernel_limit))
-	lw	a1, %lo(%larel(kernel_limit,kernel_autoL12))(a0)
-	lw	a3, %lo(%larel(DMA_portal_ptr,kernel_autoL11))(a2)
+	sw	a0, -40(s0) # 4-byte Folded Spill 
+	lw	a1, %lo(%larel(kernel_limit,kernel_autoL17))(a0)
+	lw	a3, %lo(%larel(DMA_portal_ptr,kernel_autoL16))(a2)
 	sw	a1, 4(a3) 
 	lw	a3, -24(s0) 
 	lw	a1, 8(a3) 
 	lw	a3, 4(a3) 
 	sub	a1, a1, a3 
-	lw	a2, %lo(%larel(DMA_portal_ptr,kernel_autoL11))(a2)
+	lw	a2, %lo(%larel(DMA_portal_ptr,kernel_autoL16))(a2)
 	sw	a1, 8(a2) 
-	lw	a0, %lo(%larel(kernel_limit,kernel_autoL12))(a0)
+	lw	a0, %lo(%larel(kernel_limit,kernel_autoL17))(a0)
+kernel_autoL18:
+	auipc	a1, %hi(%pcrel(RAM_limit))
+	lw	a2, %lo(%larel(RAM_limit,kernel_autoL18))(a1)
+	mv	a1, a2 
+	call	scheduler_add_process 
+	lw	a0, -40(s0) # 4-byte Folded Reload 
+	lw	a0, %lo(%larel(kernel_limit,kernel_autoL17))(a0)
 	call	userspace_jump 
-	j	kernel_LBB2_3 
-kernel_LBB2_3:
-	lw	ra, 28(sp) # 4-byte Folded Reload 
-	lw	s0, 24(sp) # 4-byte Folded Reload 
-	addi	sp, sp, 32 
+	j	kernel_LBB2_5 
+kernel_LBB2_5:
+	lw	ra, 44(sp) # 4-byte Folded Reload 
+	lw	s0, 40(sp) # 4-byte Folded Reload 
+	addi	sp, sp, 48 
 	ret	
 kernel_Lfunc_end2:
 	#	-- End function 
@@ -216,4 +253,6 @@ kernel_L.str.3:
 kernel_L.str.4:
 	.asciz	"\n"
 kernel_L.str.5:
+	.asciz	"Initializing scheduler...\n"
+kernel_L.str.6:
 	.asciz	"Running program...\n"

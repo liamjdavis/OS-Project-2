@@ -1,6 +1,6 @@
 	.text
 	.attribute	4, 16
-	.attribute	5, "rv32i2p1_m2p0"
+	.attribute	5, "rv32i2p1_m2p0_zmmul1p0"
 	.file	"scheduler.c"
 	.globl	enqueue                         # -- Begin function enqueue
 	.p2align	2
@@ -571,7 +571,7 @@ next_pid:
 	.word	1                               # 0x1
 	.size	next_pid, 4
 
-	.ident	"Ubuntu clang version 18.1.3 (1ubuntu1)"
+	.ident	"clang version 19.1.6"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
 	.addrsig_sym enqueue

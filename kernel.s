@@ -1,6 +1,6 @@
 	.text
 	.attribute	4, 16
-	.attribute	5, "rv32i2p1_m2p0"
+	.attribute	5, "rv32i2p1_m2p0_zmmul1p0"
 	.file	"kernel.c"
 	.globl	int_to_hex                      # -- Begin function int_to_hex
 	.p2align	2
@@ -134,10 +134,10 @@ kernel_Lfunc_end1:
 	.type	run_programs,@function
 run_programs:                           # @run_programs
 # %bb.0:
-	addi	sp, sp, -32
-	sw	ra, 28(sp)                      # 4-byte Folded Spill
-	sw	s0, 24(sp)                      # 4-byte Folded Spill
-	addi	s0, sp, 32
+	addi	sp, sp, -48
+	sw	ra, 44(sp)                      # 4-byte Folded Spill
+	sw	s0, 40(sp)                      # 4-byte Folded Spill
+	addi	s0, sp, 48
 	lui	a0, %hi(kernel_L.str.3)
 	addi	a0, a0, %lo(kernel_L.str.3)
 	call	print
@@ -164,10 +164,34 @@ run_programs:                           # @run_programs
 	bnez	a0, kernel_LBB2_2
 	j	kernel_LBB2_1
 kernel_LBB2_1:
-	j	kernel_LBB2_3
+	j	kernel_LBB2_5
 kernel_LBB2_2:
+	lui	a0, %hi(scheduler_active)
+	lw	a0, %lo(scheduler_active)(a0)
+	bnez	a0, kernel_LBB2_4
+	j	kernel_LBB2_3
+kernel_LBB2_3:
 	lui	a0, %hi(kernel_L.str.5)
 	addi	a0, a0, %lo(kernel_L.str.5)
+	call	print
+	call	scheduler_init
+	lui	a0, %hi(scheduler_start_msg)
+	lw	a0, %lo(scheduler_start_msg)(a0)
+	call	print
+	lui	a0, %hi(time_quantum)
+	lw	a0, %lo(time_quantum)(a0)
+	addi	a1, s0, -17
+	sw	a1, -36(s0)                     # 4-byte Folded Spill
+	call	int_to_hex
+	lw	a0, -36(s0)                     # 4-byte Folded Reload
+	call	print
+	lui	a0, %hi(scheduler_cycles_msg)
+	lw	a0, %lo(scheduler_cycles_msg)(a0)
+	call	print
+	j	kernel_LBB2_4
+kernel_LBB2_4:
+	lui	a0, %hi(kernel_L.str.6)
+	addi	a0, a0, %lo(kernel_L.str.6)
 	call	print
 	lw	a0, -24(s0)
 	lw	a0, 4(a0)
@@ -175,6 +199,7 @@ kernel_LBB2_2:
 	lw	a1, %lo(DMA_portal_ptr)(a2)
 	sw	a0, 0(a1)
 	lui	a0, %hi(kernel_limit)
+	sw	a0, -40(s0)                     # 4-byte Folded Spill
 	lw	a1, %lo(kernel_limit)(a0)
 	lw	a3, %lo(DMA_portal_ptr)(a2)
 	sw	a1, 4(a3)
@@ -185,12 +210,18 @@ kernel_LBB2_2:
 	lw	a2, %lo(DMA_portal_ptr)(a2)
 	sw	a1, 8(a2)
 	lw	a0, %lo(kernel_limit)(a0)
+	lui	a1, %hi(RAM_limit)
+	lw	a2, %lo(RAM_limit)(a1)
+	mv	a1, a2
+	call	scheduler_add_process
+	lw	a0, -40(s0)                     # 4-byte Folded Reload
+	lw	a0, %lo(kernel_limit)(a0)
 	call	userspace_jump
-	j	kernel_LBB2_3
-kernel_LBB2_3:
-	lw	ra, 28(sp)                      # 4-byte Folded Reload
-	lw	s0, 24(sp)                      # 4-byte Folded Reload
-	addi	sp, sp, 32
+	j	kernel_LBB2_5
+kernel_LBB2_5:
+	lw	ra, 44(sp)                      # 4-byte Folded Reload
+	lw	s0, 40(sp)                      # 4-byte Folded Reload
+	addi	sp, sp, 48
 	ret
 kernel_Lfunc_end2:
 	.size	run_programs, kernel_Lfunc_end2-run_programs
@@ -245,19 +276,31 @@ kernel_L.str.4:
 
 	.type	kernel_L.str.5,@object                # @.str.5
 kernel_L.str.5:
-	.asciz	"Running program...\n"
-	.size	kernel_L.str.5, 20
+	.asciz	"Initializing scheduler...\n"
+	.size	kernel_L.str.5, 27
 
-	.ident	"Ubuntu clang version 18.1.3 (1ubuntu1)"
+	.type	kernel_L.str.6,@object                # @.str.6
+kernel_L.str.6:
+	.asciz	"Running program...\n"
+	.size	kernel_L.str.6, 20
+
+	.ident	"clang version 19.1.6"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
 	.addrsig_sym int_to_hex
 	.addrsig_sym print
 	.addrsig_sym find_device
+	.addrsig_sym scheduler_init
+	.addrsig_sym scheduler_add_process
 	.addrsig_sym userspace_jump
 	.addrsig_sym hex_digits
 	.addrsig_sym free_list_head
 	.addrsig_sym run_programs.next_program_ROM
 	.addrsig_sym ROM_device_code
+	.addrsig_sym scheduler_active
+	.addrsig_sym scheduler_start_msg
+	.addrsig_sym time_quantum
+	.addrsig_sym scheduler_cycles_msg
 	.addrsig_sym DMA_portal_ptr
 	.addrsig_sym kernel_limit
+	.addrsig_sym RAM_limit

@@ -86,12 +86,27 @@ void run_programs () {
     return;
   }
 
+  /* Initialize the scheduler if this is the first program */
+  if (scheduler_active == 0) {
+    print("Initializing scheduler...\n");
+    scheduler_init();
+    
+    /* Display the time quantum */
+    print(scheduler_start_msg);
+    int_to_hex(time_quantum, str_buffer);
+    print(str_buffer);
+    print(scheduler_cycles_msg);
+  }
+
   print("Running program...\n");
 
   /* Copy the program into the free RAM space after the kernel. */
   DMA_portal_ptr->src    = dt_ROM_ptr->base;
   DMA_portal_ptr->dst    = kernel_limit;
   DMA_portal_ptr->length = dt_ROM_ptr->limit - dt_ROM_ptr->base; // Trigger
+
+  /* Add the program to the scheduler */
+  scheduler_add_process(kernel_limit, RAM_limit, RAM_limit);
 
   /* Jump to the copied code at the kernel limit / program base. */
   userspace_jump(kernel_limit);

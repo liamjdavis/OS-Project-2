@@ -1,6 +1,6 @@
 	.text
 	.attribute	4, 16
-	.attribute	5, "rv32i2p1_m2p0"
+	.attribute	5, "rv32i2p1_m2p0_zmmul1p0"
 	.file	"process_info.c"
 	.globl	insert_process                  # -- Begin function insert_process
 	.p2align	2
@@ -265,7 +265,7 @@ process_info_LBB3_5:
 process_info_Lfunc_end3:
 	.size	display_processes, process_info_Lfunc_end3-display_processes
                                         # -- End function
-	.ident	"Ubuntu clang version 18.1.3 (1ubuntu1)"
+	.ident	"clang version 19.1.6"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
 	.addrsig_sym malloc

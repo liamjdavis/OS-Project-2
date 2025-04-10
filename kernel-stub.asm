@@ -246,7 +246,7 @@ loop_end:
 	ret
 ### ================================================================================================================================
 
-	
+
 
 ### ================================================================================================================================
 ### Procedure: scroll_console
@@ -445,8 +445,137 @@ default_handler:
 	lw		a0,		kernel_error_unmanaged_interrupt
 	halt
 ### ================================================================================================================================
+### Procedure: alarm_handler
 
-
+alarm_handler:
+	## Reset kernel's stack and frame pointers
+	lw		fp,		kernel_limit
+	lw		sp,		kernel_limit
+	
+	## Debug message
+	la		a0,		alarm_received_msg
+	call		print
+	
+	## Save user PC from exception PC (epc) register
+	csrr		t0,		epc
+	sw		t0,		saved_user_pc, t6
+	
+	## Save user registers to saved_registers array
+	## Note: We're now in kernel mode with kernel stack, 
+	## so we can safely save all registers
+	
+	## Save all registers
+	la		t0,		saved_registers
+	
+	## Save argument registers (a0-a7)
+	sw		a0,		0(t0)     # a0 at offset 0
+	sw		a1,		4(t0)     # a1 at offset 4
+	sw		a2,		8(t0)     # a2 at offset 8
+	sw		a3,		12(t0)    # a3 at offset 12
+	sw		a4,		16(t0)    # a4 at offset 16
+	sw		a5,		20(t0)    # a5 at offset 20
+	sw		a6,		24(t0)    # a6 at offset 24
+	sw		a7,		28(t0)    # a7 at offset 28
+	
+	## Save temp registers (t0-t6)
+	## Save t0's value from stack since we're using it
+	sw		t1,		36(t0)    # t1 at offset 36
+	sw		t2,		40(t0)    # t2 at offset 40
+	sw		t3,		44(t0)    # t3 at offset 44
+	sw		t4,		48(t0)    # t4 at offset 48
+	sw		t5,		52(t0)    # t5 at offset 52
+	sw		t6,		56(t0)    # t6 at offset 56
+	
+	## Save saved registers (s0-s11)
+	sw		s0,		64(t0)    # s0 at offset 64
+	sw		s1,		68(t0)    # s1 at offset 68
+	sw		s2,		72(t0)    # s2 at offset 72
+	sw		s3,		76(t0)    # s3 at offset 76
+	sw		s4,		80(t0)    # s4 at offset 80
+	sw		s5,		84(t0)    # s5 at offset 84
+	sw		s6,		88(t0)    # s6 at offset 88
+	sw		s7,		92(t0)    # s7 at offset 92
+	sw		s8,		96(t0)    # s8 at offset 96
+	sw		s9,		100(t0)   # s9 at offset 100
+	sw		s10,		104(t0)   # s10 at offset 104
+	sw		s11,		108(t0)   # s11 at offset 108
+	
+	## Save ra, sp, and fp
+	sw		ra,		124(t0)   # ra at offset 124
+	
+	## Save the user sp and fp - we're using RAM_limit for both initially
+	## as set in userspace_jump, but in the future we'll use the actual values from
+	## the process's PCB
+	lw		t1,		RAM_limit
+	sw		t1,		116(t0)   # sp at offset 116
+	sw		t1,		120(t0)   # fp at offset 120
+	
+	## Save to dedicated variables for scheduler
+	sw		t1,		saved_user_sp, t6
+	sw		t1,		saved_user_fp, t6
+	
+	## Call the scheduler to perform context switch
+	call		scheduler_handle_alarm
+	
+	## Set up for the next time quantum
+	lw		t0,		time_quantum
+	csrr		t1,		ck
+	add		t1,		t1,		t0
+	csrw		al,		t1
+	
+	## Restore context of the new process
+	lw		t0,		saved_user_pc
+	csrw		epc,		t0
+	
+	## Load new process's stack and frame pointers
+	lw		t0,		saved_user_sp
+	lw		t1,		saved_user_fp
+	
+	## Restore all registers from saved_registers array
+	la		t2,		saved_registers
+	
+	## Restore argument registers (a0-a7) except for the ones we need
+	lw		s0,		0(t2)     # Save a0 in s0 for now
+	lw		s1,		4(t2)     # Save a1 in s1 for now 
+	lw		a2,		8(t2)
+	lw		a3,		12(t2)
+	lw		a4,		16(t2)
+	lw		a5,		20(t2)
+	lw		a6,		24(t2)
+	lw		a7,		28(t2)
+	
+	## Restore saved registers (s2-s11)
+	lw		s2,		72(t2)
+	lw		s3,		76(t2)
+	lw		s4,		80(t2)
+	lw		s5,		84(t2)
+	lw		s6,		88(t2)
+	lw		s7,		92(t2)
+	lw		s8,		96(t2)
+	lw		s9,		100(t2)
+	lw		s10,		104(t2)
+	lw		s11,		108(t2)
+	
+	## Restore most temporaries except those we need
+	lw		t3,		44(t2)
+	lw		t4,		48(t2)
+	lw		t5,		52(t2)
+	lw		t6,		56(t2)
+	
+	## Restore ra
+	lw		ra,		124(t2)
+	
+	## Now restore the remaining registers at the very end
+	mv		sp,		t0      # Restore SP
+	mv		fp,		t1      # Restore FP
+	lw		t1,		36(t2)   # t1
+	lw		t2,		40(t2)   # t2
+	mv		a0,		s0      # Restore a0 from s0
+	mv		a1,		s1      # Restore a1 from s1
+	
+	## Return to user mode
+	eret
+### ================================================================================================================================
 	
 ### ================================================================================================================================
 ### Procedure: init_trap_table
@@ -460,7 +589,7 @@ init_trap_table:
     sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
     sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
     sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
-    sw		t2,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
+    sw		t0,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
     sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
     sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
     sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
@@ -471,7 +600,7 @@ init_trap_table:
     sw		t0,		0x2c(a0)				# tt[INVALID_DEVICE_VALUE] = default_handler()
     sw		t0,		0x30(a0)				# tt[DEVICE_FAILURE]       = default_handler()
 
-    ## Set the TBR to point to the trap table, and the IBR to point to the interrupt buffer.
+    ## Set the TBR to point to the trap table
     csrw		tb,		a0					# tb = trap_base
     ret
 ### ================================================================================================================================
@@ -483,41 +612,28 @@ init_trap_table:
 
 userspace_jump:
     ## Set up stack/frame pointers for userspace
-    lw		sp,		RAM_limit
-    lw		fp,		RAM_limit
+    lw      sp,     RAM_limit
+    lw      fp,     RAM_limit
     
     ## Save the target PC - we will jump to this address
-    csrw		epc,		a0
+    csrw    epc,    a0
     
-    ## Set the alarm for the current time quantum
-    lw		t0,		time_quantum
-    csrw		al,		t0			# Set the alarm register
+    ## Set up alarm for time-based scheduling
+    lw      t0,     time_quantum        # Load time quantum value
+    csrr    t1,     ck                  # Get current clock value
+    add     t1,     t1,     t0          # Calculate when alarm should trigger
+    csrw    al,     t1                  # Set alarm register
     
-    ## Enable interrupts for alarm
-    li		t0,		0x2			# bit 1 = alarm interrupt enable
-    csrw		ie,		t0
+    ## Enable alarm in mode register (bit 4)
+    csrr    t0,     md                  # Get current mode
+    ori     t0,     t0,     0x10        # Set alarm bit (bit 4)
+    csrw    md,     t0                  # Update mode register
     
-    ## Mark scheduler as active
-    li		t0,		1
-    sw		t0,		scheduler_active,	t6
+    ## Set scheduler as active
+    li      t0,     1
+    sw      t0,     scheduler_active, t6
     
-    ## Print message about starting scheduler
-    la		a0,		scheduler_start_msg
-    call		print
-    
-    ## Print the quantum value
-    lw		a0,		time_quantum
-    addi		sp,		sp,		-16
-    mv		a1,		sp
-    call		int_to_dec			# Convert to decimal string
-    mv		a0,		sp
-    call		print
-    
-    la		a0,		scheduler_cycles_msg
-    call		print
-    addi		sp,		sp,		16	# Restore stack
-    
-    ## Jump to user space with interrupts enabled
+    ## Jump to user space
     eret
 ### ================================================================================================================================
 	
@@ -527,7 +643,6 @@ userspace_jump:
 ### Return value:
 ###   [a0]: 0 = success, 1 = invalid ROM number, 2 = insufficient RAM, 3 = other error
 ### ================================================================================================================================
-
 run_programs_done:
 	## Epilogue
 	lw ra, 4(sp)
@@ -660,6 +775,9 @@ syscall_EXIT:		0xca110001
 syscall_RUN: 0xca110002
 syscall_PRINT: 0xca110003
 
+	## Interrupt codes
+CLOCK_ALARM:		0x0c		# CLOCK_ALARM interrupt code (3rd entry in trap table)
+
 	## Constants for printing and console management.
 console_width:		80
 console_height:		24
@@ -686,7 +804,7 @@ time_quantum:		10000	# Default time quantum (clock cycles)
 saved_user_pc:		0	# Saved program counter for current process
 saved_user_sp:		0	# Saved stack pointer for current process
 saved_user_fp:		0	# Saved frame pointer for current process
-saved_registers:	0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0	# Space for saved registers
+saved_registers:	0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0	# Space for all 32 registers
 ### ================================================================================================================================
 
 
@@ -710,196 +828,10 @@ default_handler_msg:		"Default interrupt handler invoked.\n"
 done_msg:			"done.\n"
 failed_msg:			"failed!\n"
 blank_line:			"                                                                                "
-run_programs_success: "All programs have been run successfully.\n"
-debug_received_msg: "Received syscall: 0x"
-debug_exit_msg: "EXIT code is: 0x"
-alarm_received_msg: "Alarm interrupt received.\n"
+run_programs_success:		"All programs have been run successfully.\n"
+debug_received_msg:		"Received syscall: 0x"
+debug_exit_msg:			"EXIT code is: 0x"
+alarm_received_msg:		"Alarm interrupt received.\n"
 scheduler_start_msg:		"Starting scheduler with quantum of "
 scheduler_cycles_msg:		" cycles.\n"
-### ================================================================================================================================
-
-### ================================================================================================================================
-### Procedure: alarm_handler
-### Description: Handles the alarm interrupt by performing context switching and scheduling
-
-alarm_handler:
-    ## Reset kernel's stack and frame pointers.
-    lw		fp,		kernel_limit
-    lw		sp,		kernel_limit
-
-    ## Save that we received an alarm
-    la		a0,		alarm_received_msg
-    call		print
-    
-    ## Save the current process's context and schedule the next process
-    call		scheduler_handle_alarm
-
-    ## If we get here, we should resume with a new process
-    ## context already loaded by scheduler_handle_alarm
-    eret
-### ================================================================================================================================
-
-### ================================================================================================================================
-### Procedure: save_context
-### Description: Saves the current process context
-
-save_context:
-    ## Prologue
-    addi		sp,		sp,		-8
-    sw		ra,		4(sp)
-    sw		fp,		0(sp)
-    addi		fp,		sp,		8
-    
-    ## Save program counter from epc
-    csrr		t0,		epc
-    sw		t0,		saved_user_pc,	t6
-    
-    ## Save user stack and frame pointers (these will be in registers when we get here)
-    lw		t0,		RAM_limit		# User's stack top
-    sw		t0,		saved_user_sp,	t6
-    sw		t0,		saved_user_fp,	t6
-    
-    ## In a real implementation, we would save all user registers here
-    ## This is simplified since we're not doing full context switching yet
-    
-    ## Epilogue
-    lw		ra,		4(sp)
-    lw		fp,		0(sp)
-    addi		sp,		sp,		8
-    ret
-
-### ================================================================================================================================
-### Procedure: restore_context
-### Description: Restores a saved process context
-
-restore_context:
-    ## Prologue
-    addi		sp,		sp,		-8
-    sw		ra,		4(sp)
-    sw		fp,		0(sp)
-    addi		fp,		sp,		8
-    
-    ## Restore program counter to epc
-    lw		t0,		saved_user_pc
-    csrw		epc,		t0
-    
-    ## Restore user stack and frame pointers
-    lw		sp,		saved_user_sp
-    lw		fp,		saved_user_fp
-    
-    ## Reset the alarm for next quantum
-    lw		t0,		time_quantum
-    csrw		al,		t0
-    
-    ## In a real implementation, we would restore all user registers here
-    
-    ## Epilogue - don't restore sp/fp since we want user values
-    lw		ra,		4(sp)
-    addi		sp,		sp,		8
-    ret
-### ================================================================================================================================
-
-### ================================================================================================================================
-### Procedure: scheduler_handle_alarm
-### Description: Handles scheduling when an alarm interrupts occurs
-
-scheduler_handle_alarm:
-    ## Prologue
-    addi		sp,		sp,		-8
-    sw		ra,		4(sp)
-    sw		fp,		0(sp)
-    addi		fp,		sp,		8
-    
-    ## Save the context of the current process
-    call		save_context
-    
-    ## In a real implementation with multiple processes:
-    ## 1. We would select the next process to run from a ready queue
-    ## 2. Update current_process to the next one
-    ## 3. Then restore its context
-    
-    ## For now, we'll just continue with the same process
-    call		restore_context
-    
-    ## Epilogue
-    lw		ra,		4(sp)
-    lw		fp,		0(sp)
-    addi		sp,		sp,		8
-    ret
-### ================================================================================================================================
-
-### ================================================================================================================================
-### Procedure: int_to_dec
-### Parameters:
-###   [a0]: value -- The integer value to convert
-###   [a1]: buffer -- Pointer to buffer for the result string (should be at least 12 bytes)
-### Return value:
-###   <none>
-
-int_to_dec:
-    ## Prologue
-    addi		sp,		sp,		-16
-    sw		ra,		12(sp)
-    sw		fp,		8(sp)
-    sw		s0,		4(sp)
-    sw		s1,		0(sp)
-    addi		fp,		sp,		16
-    
-    ## Initialize locals
-    mv		s0,		a0		# s0 = value
-    mv		s1,		a1		# s1 = buffer
-    
-    ## Handle special case of zero
-    bnez		s0,		int_to_dec_nonzero
-    li		t0,		'0'
-    sb		t0,		0(s1)
-    sb		zero,		1(s1)		# Null terminator
-    j		int_to_dec_done
-    
-int_to_dec_nonzero:
-    ## First, find end of buffer to write backward
-    mv		t0,		s1		# t0 = current position
-    
-    ## Place null terminator
-    sb		zero,		0(t0)
-    addi		t0,		t0,		-1
-    
-    ## Handle negative numbers
-    bgez		s0,		int_to_dec_positive
-    neg		s0,		s0		# Make value positive
-    li		t1,		'-'
-    sb		t1,		0(s1)		# Put '-' sign at beginning
-    addi		s1,		s1,		1
-    
-int_to_dec_positive:
-    ## Extract digits from right to left
-int_to_dec_loop:
-    remu		t1,		s0,		10	# t1 = value % 10
-    addi		t1,		t1,		'0'	# Convert to ASCII
-    sb		t1,		0(t0)		# Store digit
-    addi		t0,		t0,		-1	# Move buffer position left
-    divu		s0,		s0,		10	# value /= 10
-    bnez		s0,		int_to_dec_loop	# Continue if value != 0
-    
-    ## Move result to beginning of buffer
-    addi		t0,		t0,		1	# Point to first digit
-    
-    ## If there's a gap between start of buffer and first digit, copy the string
-    beq		t0,		s1,		int_to_dec_done
-    
-int_to_dec_copy_loop:
-    lb		t1,		0(t0)		# Load character
-    sb		t1,		0(s1)		# Store at beginning
-    addi		t0,		t0,		1
-    addi		s1,		s1,		1
-    bnez		t1,		int_to_dec_copy_loop # Continue until null terminator
-    
-int_to_dec_done:
-    ## Epilogue
-    lw		s1,		0(sp)
-    lw		s0,		4(sp)
-    lw		fp,		8(sp)
-    lw		ra,		12(sp)
-    addi		sp,		sp,		16
-    ret
 ### ================================================================================================================================
