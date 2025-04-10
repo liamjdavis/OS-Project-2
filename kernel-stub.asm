@@ -450,40 +450,30 @@ default_handler:
 	
 ### ================================================================================================================================
 ### Procedure: init_trap_table
-### Caller preserved registers:	
-###   [fp + 0]:      pfp
-###   [ra / fp + 4]: pra
-### Parameters:
-###   [a0]: trap_base -- The address of the trap table to initialize and enable.
-### Return value:
-###   <none>
-### Callee preserved registers:
-###   <none>
-### Locals:
-###   [t0]: default_handler_ptr -- A pointer to the default interrupt handler
 
 init_trap_table:
 
-	## Set the 13 entries to point to some interrupt handler.
-	la		t0,		default_handler				# t0 = default_handler()
-	la		t1,		syscall_handler				# t1 = syscall_handler()
-	sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
-	sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
-	sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
-	sw		t0,		0x0c(a0)				# tt[CLOCK_ALARM]          = default_handler()
-	sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
-	sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
-	sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
-	sw		t0,		0x1c(a0)				# tt[PERMISSION_VIOLATION] = default_handler()
-	sw		t0,		0x20(a0)				# tt[INVALID_SHIFT_AMOUNT] = default_handler()
-	sw		t1,		0x24(a0)				# tt[SYSTEM_CALL]          = syscall_handler()
-	sw		t0,		0x28(a0)				# tt[SYSTEM_BREAK]         = default_handler()
-	sw		t0,		0x2c(a0)				# tt[INVALID_DEVICE_VALUE] = default_handler()
-	sw		t0,		0x30(a0)				# tt[DEVICE_FAILURE]       = default_handler()
+    ## Set the 13 entries to point to some interrupt handler.
+    la		t0,		default_handler				# t0 = default_handler()
+    la		t1,		syscall_handler				# t1 = syscall_handler()
+    la		t2,		alarm_handler				# t2 = alarm_handler()
+    sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
+    sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
+    sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
+    sw		t2,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
+    sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
+    sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
+    sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
+    sw		t0,		0x1c(a0)				# tt[PERMISSION_VIOLATION] = default_handler()
+    sw		t0,		0x20(a0)				# tt[INVALID_SHIFT_AMOUNT] = default_handler()
+    sw		t1,		0x24(a0)				# tt[SYSTEM_CALL]          = syscall_handler()
+    sw		t0,		0x28(a0)				# tt[SYSTEM_BREAK]         = default_handler()
+    sw		t0,		0x2c(a0)				# tt[INVALID_DEVICE_VALUE] = default_handler()
+    sw		t0,		0x30(a0)				# tt[DEVICE_FAILURE]       = default_handler()
 
-	## Set the TBR to point to the trap table, and the IBR to point to the interrupt buffer.
-	csrw		tb,		a0					# tb = trap_base
-	ret
+    ## Set the TBR to point to the trap table, and the IBR to point to the interrupt buffer.
+    csrw		tb,		a0					# tb = trap_base
+    ret
 ### ================================================================================================================================
 
 
@@ -492,10 +482,43 @@ init_trap_table:
 ### Procedure: userspace_jump
 
 userspace_jump:
-	lw		sp,		RAM_limit
-	lw		fp,		RAM_limit
-	csrw		epc,		a0
-	eret
+    ## Set up stack/frame pointers for userspace
+    lw		sp,		RAM_limit
+    lw		fp,		RAM_limit
+    
+    ## Save the target PC - we will jump to this address
+    csrw		epc,		a0
+    
+    ## Set the alarm for the current time quantum
+    lw		t0,		time_quantum
+    csrw		al,		t0			# Set the alarm register
+    
+    ## Enable interrupts for alarm
+    li		t0,		0x2			# bit 1 = alarm interrupt enable
+    csrw		ie,		t0
+    
+    ## Mark scheduler as active
+    li		t0,		1
+    sw		t0,		scheduler_active,	t6
+    
+    ## Print message about starting scheduler
+    la		a0,		scheduler_start_msg
+    call		print
+    
+    ## Print the quantum value
+    lw		a0,		time_quantum
+    addi		sp,		sp,		-16
+    mv		a1,		sp
+    call		int_to_dec			# Convert to decimal string
+    mv		a0,		sp
+    call		print
+    
+    la		a0,		scheduler_cycles_msg
+    call		print
+    addi		sp,		sp,		16	# Restore stack
+    
+    ## Jump to user space with interrupts enabled
+    eret
 ### ================================================================================================================================
 	
 ### ================================================================================================================================
@@ -654,7 +677,16 @@ console_base:		0
 console_limit:		0
 kernel_base:		0
 kernel_limit:		0
-DMA_portal_ptr:		0
+DMA_portal_ptr:			0
+
+	## Scheduling-related variables
+current_process:	0	# Current running process ID
+scheduler_active:	0	# Flag indicating if scheduler is active
+time_quantum:		10000	# Default time quantum (clock cycles)
+saved_user_pc:		0	# Saved program counter for current process
+saved_user_sp:		0	# Saved stack pointer for current process
+saved_user_fp:		0	# Saved frame pointer for current process
+saved_registers:	0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0	# Space for saved registers
 ### ================================================================================================================================
 
 
@@ -681,4 +713,193 @@ blank_line:			"                                                                 
 run_programs_success: "All programs have been run successfully.\n"
 debug_received_msg: "Received syscall: 0x"
 debug_exit_msg: "EXIT code is: 0x"
+alarm_received_msg: "Alarm interrupt received.\n"
+scheduler_start_msg:		"Starting scheduler with quantum of "
+scheduler_cycles_msg:		" cycles.\n"
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: alarm_handler
+### Description: Handles the alarm interrupt by performing context switching and scheduling
+
+alarm_handler:
+    ## Reset kernel's stack and frame pointers.
+    lw		fp,		kernel_limit
+    lw		sp,		kernel_limit
+
+    ## Save that we received an alarm
+    la		a0,		alarm_received_msg
+    call		print
+    
+    ## Save the current process's context and schedule the next process
+    call		scheduler_handle_alarm
+
+    ## If we get here, we should resume with a new process
+    ## context already loaded by scheduler_handle_alarm
+    eret
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: save_context
+### Description: Saves the current process context
+
+save_context:
+    ## Prologue
+    addi		sp,		sp,		-8
+    sw		ra,		4(sp)
+    sw		fp,		0(sp)
+    addi		fp,		sp,		8
+    
+    ## Save program counter from epc
+    csrr		t0,		epc
+    sw		t0,		saved_user_pc,	t6
+    
+    ## Save user stack and frame pointers (these will be in registers when we get here)
+    lw		t0,		RAM_limit		# User's stack top
+    sw		t0,		saved_user_sp,	t6
+    sw		t0,		saved_user_fp,	t6
+    
+    ## In a real implementation, we would save all user registers here
+    ## This is simplified since we're not doing full context switching yet
+    
+    ## Epilogue
+    lw		ra,		4(sp)
+    lw		fp,		0(sp)
+    addi		sp,		sp,		8
+    ret
+
+### ================================================================================================================================
+### Procedure: restore_context
+### Description: Restores a saved process context
+
+restore_context:
+    ## Prologue
+    addi		sp,		sp,		-8
+    sw		ra,		4(sp)
+    sw		fp,		0(sp)
+    addi		fp,		sp,		8
+    
+    ## Restore program counter to epc
+    lw		t0,		saved_user_pc
+    csrw		epc,		t0
+    
+    ## Restore user stack and frame pointers
+    lw		sp,		saved_user_sp
+    lw		fp,		saved_user_fp
+    
+    ## Reset the alarm for next quantum
+    lw		t0,		time_quantum
+    csrw		al,		t0
+    
+    ## In a real implementation, we would restore all user registers here
+    
+    ## Epilogue - don't restore sp/fp since we want user values
+    lw		ra,		4(sp)
+    addi		sp,		sp,		8
+    ret
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: scheduler_handle_alarm
+### Description: Handles scheduling when an alarm interrupts occurs
+
+scheduler_handle_alarm:
+    ## Prologue
+    addi		sp,		sp,		-8
+    sw		ra,		4(sp)
+    sw		fp,		0(sp)
+    addi		fp,		sp,		8
+    
+    ## Save the context of the current process
+    call		save_context
+    
+    ## In a real implementation with multiple processes:
+    ## 1. We would select the next process to run from a ready queue
+    ## 2. Update current_process to the next one
+    ## 3. Then restore its context
+    
+    ## For now, we'll just continue with the same process
+    call		restore_context
+    
+    ## Epilogue
+    lw		ra,		4(sp)
+    lw		fp,		0(sp)
+    addi		sp,		sp,		8
+    ret
+### ================================================================================================================================
+
+### ================================================================================================================================
+### Procedure: int_to_dec
+### Parameters:
+###   [a0]: value -- The integer value to convert
+###   [a1]: buffer -- Pointer to buffer for the result string (should be at least 12 bytes)
+### Return value:
+###   <none>
+
+int_to_dec:
+    ## Prologue
+    addi		sp,		sp,		-16
+    sw		ra,		12(sp)
+    sw		fp,		8(sp)
+    sw		s0,		4(sp)
+    sw		s1,		0(sp)
+    addi		fp,		sp,		16
+    
+    ## Initialize locals
+    mv		s0,		a0		# s0 = value
+    mv		s1,		a1		# s1 = buffer
+    
+    ## Handle special case of zero
+    bnez		s0,		int_to_dec_nonzero
+    li		t0,		'0'
+    sb		t0,		0(s1)
+    sb		zero,		1(s1)		# Null terminator
+    j		int_to_dec_done
+    
+int_to_dec_nonzero:
+    ## First, find end of buffer to write backward
+    mv		t0,		s1		# t0 = current position
+    
+    ## Place null terminator
+    sb		zero,		0(t0)
+    addi		t0,		t0,		-1
+    
+    ## Handle negative numbers
+    bgez		s0,		int_to_dec_positive
+    neg		s0,		s0		# Make value positive
+    li		t1,		'-'
+    sb		t1,		0(s1)		# Put '-' sign at beginning
+    addi		s1,		s1,		1
+    
+int_to_dec_positive:
+    ## Extract digits from right to left
+int_to_dec_loop:
+    remu		t1,		s0,		10	# t1 = value % 10
+    addi		t1,		t1,		'0'	# Convert to ASCII
+    sb		t1,		0(t0)		# Store digit
+    addi		t0,		t0,		-1	# Move buffer position left
+    divu		s0,		s0,		10	# value /= 10
+    bnez		s0,		int_to_dec_loop	# Continue if value != 0
+    
+    ## Move result to beginning of buffer
+    addi		t0,		t0,		1	# Point to first digit
+    
+    ## If there's a gap between start of buffer and first digit, copy the string
+    beq		t0,		s1,		int_to_dec_done
+    
+int_to_dec_copy_loop:
+    lb		t1,		0(t0)		# Load character
+    sb		t1,		0(s1)		# Store at beginning
+    addi		t0,		t0,		1
+    addi		s1,		s1,		1
+    bnez		t1,		int_to_dec_copy_loop # Continue until null terminator
+    
+int_to_dec_done:
+    ## Epilogue
+    lw		s1,		0(sp)
+    lw		s0,		4(sp)
+    lw		fp,		8(sp)
+    lw		ra,		12(sp)
+    addi		sp,		sp,		16
+    ret
 ### ================================================================================================================================
