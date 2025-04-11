@@ -451,6 +451,10 @@ alarm_handler:
 	## Reset kernel's stack and frame pointers
 	lw		fp,		kernel_limit
 	lw		sp,		kernel_limit
+
+    ## Check if scheduler is active
+    lw      t0,     scheduler_active
+    beqz    t0,     alarm_handler_return  
 	
 	## Debug message
 	la		a0,		alarm_received_msg
@@ -575,6 +579,9 @@ alarm_handler:
 	
 	## Return to user mode
 	eret
+
+alarm_handler_return:
+    eret
 ### ================================================================================================================================
 	
 ### ================================================================================================================================
@@ -589,7 +596,7 @@ init_trap_table:
     sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
     sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
     sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
-    sw		t0,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
+    sw		t2,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
     sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
     sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
     sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
@@ -618,6 +625,10 @@ userspace_jump:
     ## Save the target PC - we will jump to this address
     csrw    epc,    a0
     
+    ## Add a check for scheduler_active before enabling alarm
+    lw      t0,     scheduler_active
+    beqz    t0,     skip_alarm_setup    # Skip alarm setup if scheduler not active
+    
     ## Set up alarm for time-based scheduling
     lw      t0,     time_quantum        # Load time quantum value
     csrr    t1,     ck                  # Get current clock value
@@ -629,10 +640,7 @@ userspace_jump:
     ori     t0,     t0,     0x10        # Set alarm bit (bit 4)
     csrw    md,     t0                  # Update mode register
     
-    ## Set scheduler as active
-    li      t0,     1
-    sw      t0,     scheduler_active, t6
-    
+skip_alarm_setup:
     ## Jump to user space
     eret
 ### ================================================================================================================================

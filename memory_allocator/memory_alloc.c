@@ -1,5 +1,5 @@
-#include "memory-alloc.h"
-#include "../heap_allocator/heap-alloc.h"
+#include "memory_alloc.h"
+#include "../heap_allocator/heap_alloc.h"
 
 void* malloc(word_t size) {
     if (size == 0) {

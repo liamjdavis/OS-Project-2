@@ -1,6 +1,6 @@
 	.text
 	.attribute	4, 16
-	.attribute	5, "rv32i2p1_m2p0_zmmul1p0"
+	.attribute	5, "rv32i2p1_m2p0"
 	.file	"kernel.c"
 	.globl	int_to_hex                      # -- Begin function int_to_hex
 	.p2align	2
@@ -284,7 +284,7 @@ kernel_L.str.6:
 	.asciz	"Running program...\n"
 	.size	kernel_L.str.6, 20
 
-	.ident	"clang version 19.1.6"
+	.ident	"Ubuntu clang version 18.1.3 (1ubuntu1)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
 	.addrsig_sym int_to_hex

@@ -1,5 +1,5 @@
 #include "process_info.h"
-#include "../memory_allocator/memory-alloc.h"
+#include "../memory_allocator/memory_alloc.h"
 #include "../types.h"
 #include "../linked_list.h"
 

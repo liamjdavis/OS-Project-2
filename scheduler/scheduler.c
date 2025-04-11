@@ -1,7 +1,7 @@
 #include "scheduler.h"
 #include "../syscall-wrappers.h"
 #include "../process_info/process_info.h"
-#include "../memory_allocator/memory-alloc.h"
+#include "../memory_allocator/memory_alloc.h"
 #include "../types.h"
 
 // External references to kernel-stub.asm variables
@@ -12,15 +12,23 @@ extern word_t saved_user_fp;
 extern word_t saved_registers[32];
 
 // Scheduler state
-static pcb_t* ready_queue = NULL;
-static pcb_t* current_process = NULL;
-static int next_pid = 1;
+static pcb_t* ready_queue __attribute__((aligned(4))) = NULL;
+static pcb_t* current_process __attribute__((aligned(4))) = NULL;
+static int next_pid __attribute__((aligned(4))) = 1;
 
 // Circular queue operations
 void enqueue(pcb_t** queue, pcb_t* process) {
+    if (queue == NULL || process == NULL) {
+        print("Invalid queue or process\n");
+        return;
+    }
+    
+    process->next = NULL;  // Ensure no stale pointers
+    
     if (*queue == NULL) {
         *queue = process;
-        process->next = process;
+        process->next = process;  // Circular queue
+        return;
     } else {
         pcb_t* last = *queue;
         while (last->next != *queue) {
@@ -55,20 +63,45 @@ pcb_t* dequeue(pcb_t** queue) {
 
 // Initialize the scheduler
 void scheduler_init(void) {
+    // Ensure clean initialization
     ready_queue = NULL;
     current_process = NULL;
     next_pid = 1;
     
-    // Set default time quantum if not already set
+    // Initialize scheduling variables in kernel
+    extern word_t scheduler_active;
+    scheduler_active = 0;  // Start with scheduler inactive
+    
     if (time_quantum == 0) {
-        time_quantum = 10000;  // Default to 10,000 cycles
+        time_quantum = 10000;
     }
+    
+    // Clear saved context
+    saved_user_pc = 0;
+    saved_user_sp = 0;
+    saved_user_fp = 0;
+    
+    // Zero out saved registers
+    for (int i = 0; i < 32; i++) {
+        saved_registers[i] = 0;
+    }
+    
+    print("Scheduler initialized successfully.\n");
 }
 
 // Add a new process to the scheduler
 void scheduler_add_process(word_t pc, word_t sp, word_t fp) {
     pcb_t* new_process = (pcb_t*)malloc(sizeof(pcb_t));
-    if (!new_process) return;
+    if (new_process == NULL) {
+        print("Failed to allocate PCB\n");
+        return;
+    }
+    
+    // Zero out the entire PCB first
+    char* p = (char*)new_process;
+    for(int i = 0; i < sizeof(pcb_t); i++) {
+        p[i] = 0;
+    }
     
     // Initialize the PCB
     new_process->pid = next_pid++;
@@ -76,11 +109,7 @@ void scheduler_add_process(word_t pc, word_t sp, word_t fp) {
     new_process->context.pc = pc;
     new_process->context.sp = sp;
     new_process->context.fp = fp;
-    
-    // Clear register context
-    for (int i = 0; i < 32; i++) {
-        new_process->context.regs[i] = 0;
-    }
+    new_process->next = NULL;  // Explicitly set next to NULL
     
     // Add to ready queue
     enqueue(&ready_queue, new_process);
@@ -158,12 +187,18 @@ void context_switch(void) {
 
 // Handle alarm interrupt - this is called from alarm_handler in kernel-stub.asm
 void scheduler_handle_alarm(void) {
-    // If scheduler not initialized or no processes, just return
-    if (ready_queue == NULL && current_process == NULL) {
+    // Add more safety checks
+    if (!ready_queue && !current_process) {
+        print("Alarm received but no processes to schedule\n");
         return;
     }
     
-    // Perform context switch
+    // Only perform context switch if scheduler is active
+    extern word_t scheduler_active;  // Add this at top of file
+    if (!scheduler_active) {
+        return;
+    }
+    
     context_switch();
 }
 

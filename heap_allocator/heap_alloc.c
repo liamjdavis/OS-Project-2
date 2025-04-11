@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "heap-alloc.h"
+#include "heap_alloc.h"
 #include "../types.h"
 #include "../linked_list.h"
 
