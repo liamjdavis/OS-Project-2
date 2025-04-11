@@ -42,6 +42,15 @@ void int_to_hex (word_t value, char* buffer);
  * zeros are not generated.  The buffer space should be at least 11 characters in length.
  */
 void int_to_dec (word_t value, char* buffer);
+
+/**
+ * Copy a string with length limit and ensure null termination.
+ * 
+ * \param dest     The destination buffer
+ * \param src      The source string
+ * \param max_len  Maximum number of characters to copy including null terminator
+ */
+void copy_str(char* dest, const char* src, int max_len);
 /* =============================================================================================================================== */
 
 

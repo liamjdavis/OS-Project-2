@@ -246,7 +246,7 @@ loop_end:
 	ret
 ### ================================================================================================================================
 
-	
+
 
 ### ================================================================================================================================
 ### Procedure: scroll_console
@@ -317,40 +317,49 @@ _scroll_console_update_offset:
 
 
 ### ================================================================================================================================
-### Procedure: do_exit
+### Procedure: load_process_state
+### Description: Loads process state and sets up next alarm
+### Parameters:
+###   [a1]: process_info pointer
+### Preserved registers:
+###   [sp + 0]: ra
+### Return:
+###   None
 
-do_exit:
+load_process_state:
+	# Save return address
+	addi    sp, sp, -4
+	sw      ra, 0(sp)         # Preserve ra
 
-	## Prologue.
-	addi		sp,		sp,		-8
-	sw		ra,		4(sp)						# Preserve ra
-	sw		fp,		0(sp)						# Preserve fp
-	addi		fp,		sp,		8				# Set fp
+	lw      t1, 56(a1)         # Load new SP (offset: pid[4] + name[52] = 56)
+	lw      t2, 60(a1)         # Load new PC (offset: after sp)
 	
-	## Show that we got here.
-	la		a0,		exit_msg					# Print EXIT occurrence.
-	call		print
+	# Restore return address before changing SP
+	lw      ra, 0(sp)         # Restore ra
+	addi    sp, sp, 4
 
-	## Try to load the next ROM.
-	call		run_programs
+	mv      sp, t1             # Set new SP
+	csrw    epc, t2           # Set new PC in EPC
 
-	## Epilogue: If we are here, no program ran, so restore and return.
-	lw		ra,		4(sp)						# Restore ra
-	lw		fp,		0(sp)						# Restore fp
-	addi		sp,		sp,		8
+	# Set up next alarm
+	csrr    t0, ck            # Get current cycle count
+	lw      t1, QUANTA_CYCLES # Load QUANTA_CYCLES value
+	add     t1, t0, t1        # Add current cycle count + QUANTA_CYCLES
+	csrw    al, t1            # Set next alarm
 	ret
-### ================================================================================================================================
 
-
-	
 ### ================================================================================================================================
 ### Procedure: syscall_handler
 
 syscall_handler:
-
 	## Reset kernel's stack and frame pointers.
 	lw		fp,		kernel_limit
 	lw		sp,		kernel_limit
+
+	# Disable alarm interrupts
+	csrr    t0, md                  # Read current mode
+	andi    t0, t0, 0xF          # Clear alarm bit (bit 4)
+	csrw    md, t0                 # Write back to mode register
 
 	# Save received syscall code
 	mv s0, a0
@@ -386,21 +395,50 @@ syscall_handler:
 	j		syscall_handler_halt
 
 handle_exit:
-
-	## An exit was requested.  Move onto the next ROM.
-	call		do_exit
-
-	## If we are here, then the end of the ROMs was reached.
-	la		a0,		all_programs_run_msg
+	## An exit was requested. Save registers.
+	addi		sp,		sp,		-8
+	sw		ra,		4(sp)						# Preserve ra
+	sw		fp,		0(sp)						# Preserve fp
+	addi		fp,		sp,		8				# Set fp
+	
+	## Show that we got here.
+	la		a0,		exit_msg					# Print EXIT occurrence.
 	call		print
 
-	j syscall_handler_halt
+	## Handle process exit and cleanup
+	call		handle_process_exit
 
-	## Fall through...
+	## If we get here and there are no more processes, halt the system
+	la		t0,		current_process		# Get address of current_process variable
+	lw		t0,		0(t0)			# Load value (pointer) stored at that address
+	beqz		t0,		exit_system		# If current_process is NULL, exit
+	
+	# Re-enable alarm interrupts before loading new process
+	csrr    t0, md                  # Read current mode
+	ori     t0, t0, 0x10           # Set alarm bit (bit 4)
+	csrw    md, t0                 # Write back to mode register
+
+	# Load new process state
+	la      t0, current_process  # Get address of current_process variable
+	lw      a1, 0(t0)           # Load value (pointer) stored at that address
+	call    load_process_state
+	eret
+
+exit_system:
+	## Print final message and halt
+	la		a0,		all_programs_run_msg
+	call		print
+	j		syscall_handler_halt
 
 handle_run:
-    # Instead of calling run_program, call run_programs
+    # Move ROM number from a1 to a0 for run_programs
+    mv a0, a1
     call run_programs
+    
+    # Re-enable alarm interrupts before returning
+    csrr    t0, md                  # Read current mode
+    ori     t0, t0, 0x10           # Set alarm bit (bit 4)
+    csrw    md, t0                 # Write back to mode register
     
     # Set success return value
     li a0, 0
@@ -410,15 +448,19 @@ handle_print:
 	# Move string pointer to a0
 	mv a0, a1
 	call print
+
+	# Re-enable alarm interrupts before returning
+	csrr    t0, md                  # Read current mode
+	ori     t0, t0, 0x10           # Set alarm bit (bit 4)
+	csrw    md, t0                 # Write back to mode register
+
 	eret
 
 syscall_handler_halt:
-	
 	## Halt.  No need to preserve/restore state, because we're halting.
 	la		a0,		halting_msg					# Print halting.
 	call		print
 	halt
-	
 ### ================================================================================================================================
 
 
@@ -446,6 +488,30 @@ default_handler:
 	halt
 ### ================================================================================================================================
 
+### ================================================================================================================================
+### Procedure: alarm_handler
+### Description: Handles CLOCK_ALARM interrupts for process scheduling
+### The handler:
+### 1. Saves current process state (SP and PC)
+### 2. Calls C scheduler to select next process
+### 3. Loads new process state and sets up next alarm
+### 4. Returns to new process via eret
+
+alarm_handler:
+	# First save the user's SP before we modify it
+	mv      a0, sp              # Save user's SP in t0
+	csrr    a1, epc            # Get EPC from CSR
+
+	# Call C scheduler with user SP and PC
+	call    schedule           # Schedule will update current_process pointer
+
+	# Load new process state
+	la      t0, current_process  # Get address of current_process variable
+	lw      a1, 0(t0)           # Load value (pointer) stored at that address
+	call    load_process_state
+	eret
+### ================================================================================================================================
+
 
 	
 ### ================================================================================================================================
@@ -467,10 +533,11 @@ init_trap_table:
 	## Set the 13 entries to point to some interrupt handler.
 	la		t0,		default_handler				# t0 = default_handler()
 	la		t1,		syscall_handler				# t1 = syscall_handler()
+	la		t2,		alarm_handler				# t2 = alarm_handler()
 	sw		t0,		0x00(a0)				# tt[INVALID_ADDRESS]      = default_handler()
 	sw		t0,		0x04(a0)				# tt[INVALID_REGISTER]     = default_handler()
 	sw		t0,		0x08(a0)				# tt[BUS_ERROR]            = default_handler()
-	sw		t0,		0x0c(a0)				# tt[CLOCK_ALARM]          = default_handler()
+	sw		t2,		0x0c(a0)				# tt[CLOCK_ALARM]          = alarm_handler()
 	sw		t0,		0x10(a0)				# tt[DIVIDE_BY_ZERO]       = default_handler()
 	sw		t0,		0x14(a0)				# tt[OVERFLOW]             = default_handler()
 	sw		t0,		0x18(a0)				# tt[INVALID_INSTRUCTION]  = default_handler()
@@ -576,9 +643,22 @@ main_with_console:
 	lw a0, kernel_limit
 	lw a1, RAM_limit
 	call init_memory
+
+	## Initialize alarm system - do this just before running first program
+	# Enable alarm bit (bit 4) in mode register
+	csrr    t0, md                  # Read current mode
+	ori     t0, t0, 0x10           # Set alarm bit (bit 4)
+	csrw    md, t0                 # Write back to mode register
+
+	# Set initial alarm value
+	csrr    t0, ck                 # Get current cycle count
+	lw      t1, QUANTA_CYCLES      # Load QUANTA_CYCLES value
+	add     t0, t0, t1             # First alarm at current + QUANTA_CYCLES
+	csrw    al, t0                 # Set alarm register
 	
 	## Call run_programs() to invoke each program ROM in turn.
-	call		run_programs
+	addi a0, zero, 3  # Start with ROM #3 (after BIOS and kernel)
+	call run_programs
 	
 	## Epilogue: If we reach here, there were no ROMs, so use the frame to emit an error message and halt.
 	la		a0,		no_programs_msg
@@ -655,6 +735,10 @@ console_limit:		0
 kernel_base:		0
 kernel_limit:		0
 DMA_portal_ptr:		0
+
+current_process:		0	# Pointer to currently running process
+
+QUANTA_CYCLES:		1000    # Number of cycles per time quantum
 ### ================================================================================================================================
 
 
@@ -681,4 +765,7 @@ blank_line:			"                                                                 
 run_programs_success: "All programs have been run successfully.\n"
 debug_received_msg: "Received syscall: 0x"
 debug_exit_msg: "EXIT code is: 0x"
+
+	## Marker to indicate the end of all static data
+kernel_end_marker: "KERNEL_END_MARKER"
 ### ================================================================================================================================

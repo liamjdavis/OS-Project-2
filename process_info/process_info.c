@@ -1,19 +1,19 @@
-#include <stdio.h>
-#include "../memory_allocator/memory-alloc.h"
-#include <string.h>
+#include "../memory_allocator/memory_alloc.h"
+#include "../kernel-stub.h"
 #include "process_info.h"
 #include "../types.h"
 #include "../linked_list.h"
+#include "../utility/utility.h"
 
 /* Function to insert a new process into the circular doubly linked list */
-void insert_process(process_info_t** head, int pid, const char* name, void* sp, void* pc) {
+void insert_process(process_info_t** head, int pid, const char* name, address_t sp, address_t pc) {
     process_info_t* new_process = (process_info_t*)malloc(sizeof(process_info_t));
     if (!new_process) {
-        printf("Memory allocation failed\n");
+        print("Memory allocation failed\n");
         return;
     }
     new_process->pid = pid;
-    strncpy(new_process->name, name, 50);
+    copy_str(new_process->name, name, 50);
     new_process->sp = sp;
     new_process->pc = pc;
 
@@ -62,12 +62,29 @@ void delete_process(process_info_t** head, int pid) {
 /* Function to display the process list */
 void display_processes(process_info_t* head) {
     if (head == NULL) {
-        printf("No processes available\n");
+        print("No processes available\n");
         return;
     }
     process_info_t* temp = head;
     do {
-        printf("PID: %d, Name: %s, SP: %p, PC: %p\n", temp->pid, temp->name, temp->sp, temp->pc);
+        char pid_str[9];
+        char sp_str[9];
+        char pc_str[9];
+        
+        int_to_hex(temp->pid, pid_str);
+        int_to_hex((word_t)temp->sp, sp_str);
+        int_to_hex((word_t)temp->pc, pc_str);
+        
+        print("PID: ");
+        print(pid_str);
+        print(", Name: ");
+        print(temp->name);
+        print(", SP: ");
+        print(sp_str);
+        print(", PC: ");
+        print(pc_str);
+        print("\n");
+        
         temp = temp->next;
     } while (temp != head);
 }

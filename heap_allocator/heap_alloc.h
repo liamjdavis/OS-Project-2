@@ -10,13 +10,20 @@
 /* =============================================================================================================================== */
 /* INCLUDES */
 
+#include "../types.h"
 
 /* =============================================================================================================================== */
-
-
 
 /* =============================================================================================================================== */
 /* PROTOTYPES */
+
+/**
+ * Initialize the heap with the specified start address.
+ *
+ * \param heap_start The address to use as the start of the heap space.
+ * \return Pointer to the head of the free blocks list.
+ */
+header_s* heap_init(word_t heap_start);
 
 /**
  * Allocate a block of memory that is at least as large as the requested size.

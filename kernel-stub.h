@@ -27,6 +27,13 @@ dt_entry_s* find_device (uint32_t type, uint32_t instance);
  */
 void print (char* msg);
 
+/**
+ * Run a program from the specified ROM number.
+ *
+ * \param rom_number The ROM number to load and execute.
+ */
+void run_programs(word_t rom_number);
+
 extern uint32_t none_device_code;
 extern uint32_t controller_device_code;
 extern uint32_t ROM_device_code;
