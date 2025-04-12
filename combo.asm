@@ -512,9 +512,14 @@ default_handler:
 ### 4. Returns to new process via eret
 
 alarm_handler:
+	la a0, alarm_interupt_msg
+	call print
+
 	# First save the user's SP before we modify it
 	mv      a0, sp              # Save user's SP in t0
 	csrr    a1, epc            # Get EPC from CSR
+
+	addi a1, a1, 4 # increment user pc
 
 	# Call C scheduler with user SP and PC
 	call    schedule           # Schedule will update current_process pointer
@@ -770,6 +775,7 @@ run_programs_success: "All programs have been run successfully.\n"
 debug_received_msg: "Received syscall: 0x"
 debug_exit_msg: "EXIT code is: 0x"
 sys_call_made_msg: "System call made.\n"
+alarm_interupt_msg: "Alarm interupt occured. Switching processes...\n"
 ### ================================================================================================================================
 	.Code
 init_process_management:
