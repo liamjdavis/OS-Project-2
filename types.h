@@ -27,10 +27,4 @@ typedef struct free_block {
   struct free_block *next;
 } free_block_s;
 
-typedef struct header {
-    struct header* next;
-    struct header* prev;
-    word_t size;
-} header_s;
-
 #endif /* _TYPES_H */

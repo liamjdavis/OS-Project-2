@@ -320,46 +320,69 @@ _scroll_console_update_offset:
 ### Procedure: load_process_state
 ### Description: Loads process state and sets up next alarm
 ### Parameters:
-###   [a1]: process_info pointer
+###   [a0]: process_info pointer
 ### Preserved registers:
 ###   [sp + 0]: ra
 ### Return:
-###   None
+###   None - sets EPC directly
 
 load_process_state:
-	# Save return address
-	addi    sp, sp, -4
-	sw      ra, 0(sp)         # Preserve ra
+	# First save the kernel's SP in a temporary register
+	mv      t3, sp              # Save kernel's SP in t3
 
-	lw      t1, 56(a1)         # Load new SP (offset: pid[4] + name[52] = 56)
-	lw      t2, 60(a1)         # Load new PC (offset: after sp)
-	
-	# Restore return address before changing SP
-	lw      ra, 0(sp)         # Restore ra
-	addi    sp, sp, 4
+	# Load new process state
+	lw      t1, 4(a0)         # Load new SP (offset: pid[4])
+	lw      t2, 8(a0)         # Load new PC (offset: after sp)
 
-	mv      sp, t1             # Set new SP
-	csrw    epc, t2           # Set new PC in EPC
-
-	# Set up next alarm
+	# Set up next alarm while keeping MSB clear
 	csrr    t0, ck            # Get current cycle count
 	lw      t1, QUANTA_CYCLES # Load QUANTA_CYCLES value
 	add     t1, t0, t1        # Add current cycle count + QUANTA_CYCLES
 	csrw    al, t1            # Set next alarm
-	ret
+
+	# Enable alarm bit (bit 4) in mode register
+	csrr    t0, md                  # Read current mode
+	ori     t0, t0, 0x10          # Set alarm byte (bit 4)
+	csrw    md, t0                 # Write back to mode register
+
+	# Set EPC to the new PC value before returning
+	csrw    epc, t2          # Set EPC to new PC value
+
+	# Now set the user's stack pointer last, right before eret
+	# mv      sp, t1            # Some kind of bug where the eret needs the sp
+
+	eret
 
 ### ================================================================================================================================
 ### Procedure: syscall_handler
 
 syscall_handler:
+	# Disable alarm interrupts by setting MSB of alarm register
+	csrr    t0, al                  # Read current alarm value
+	li      t1, 0x80000000         # Create mask with MSB=1
+	or      t0, t0, t1             # Set MSB to disable alarm (makes it far in future)
+	csrw    al, t0                 # Write back to alarm register
+
+	mv s1, a1 # Save any auxiliary info (e.g., RUN call ROM number)
+	csrr s2, epc # save the epc
+
+	# Update current process's PC to point to next instruction
+	la t0, current_process
+	lw t0, 0(t0)
+	addi t1, s2, 4         # Calculate next instruction address (current EPC + 4)
+	sw t1, 8(t0)           # Store in process's PC field (offset 8 from process_info_t struct)
+
 	## Reset kernel's stack and frame pointers.
 	lw		fp,		kernel_limit
 	lw		sp,		kernel_limit
 
-	# Disable alarm interrupts
-	csrr    t0, md                  # Read current mode
-	andi    t0, t0, 0xF          # Clear alarm bit (bit 4)
-	csrw    md, t0                 # Write back to mode register
+	# Print sys_call_made_msg
+	addi    sp, sp, -4      # Save a0 since we need it for print
+	sw      a0, 0(sp)       # Store original syscall code
+	la      a0, sys_call_made_msg
+	call    print
+	lw      a0, 0(sp)       # Restore original syscall code
+	addi    sp, sp, 4       # Restore stack pointer
 
 	# Save received syscall code
 	mv s0, a0
@@ -413,16 +436,11 @@ handle_exit:
 	lw		t0,		0(t0)			# Load value (pointer) stored at that address
 	beqz		t0,		exit_system		# If current_process is NULL, exit
 	
-	# Re-enable alarm interrupts before loading new process
-	csrr    t0, md                  # Read current mode
-	ori     t0, t0, 0x10           # Set alarm bit (bit 4)
-	csrw    md, t0                 # Write back to mode register
 
 	# Load new process state
-	la      t0, current_process  # Get address of current_process variable
-	lw      a1, 0(t0)           # Load value (pointer) stored at that address
+	la      a0, current_process  # Get address of current_process variable
+	lw a0, 0(a0)
 	call    load_process_state
-	eret
 
 exit_system:
 	## Print final message and halt
@@ -431,29 +449,25 @@ exit_system:
 	j		syscall_handler_halt
 
 handle_run:
-    # Move ROM number from a1 to a0 for run_programs
-    mv a0, a1
+    # Move ROM number from s1 to a0 for run_programs
+    mv a0, s1
     call run_programs
     
-    # Re-enable alarm interrupts before returning
-    csrr    t0, md                  # Read current mode
-    ori     t0, t0, 0x10           # Set alarm bit (bit 4)
-    csrw    md, t0                 # Write back to mode register
-    
-    # Set success return value
-    li a0, 0
-    eret
+    # Set success return value and return to user mode
+    call    load_process_state
 
 handle_print:
 	# Move string pointer to a0
 	mv a0, a1
 	call print
 
-	# Re-enable alarm interrupts before returning
-	csrr    t0, md                  # Read current mode
-	ori     t0, t0, 0x10           # Set alarm bit (bit 4)
-	csrw    md, t0                 # Write back to mode register
+	# Re-enable alarm interrupts by setting next alarm time with MSB clear
+	csrr    t0, ck                 # Get current cycle count
+	lw      t1, QUANTA_CYCLES      # Load QUANTA_CYCLES value
+	add     t0, t0, t1             # Next alarm at current + QUANTA_CYCLES
+	csrw    al, t0                 # Set alarm register with enabled value
 
+	csrw epc, s2
 	eret
 
 syscall_handler_halt:
@@ -509,7 +523,6 @@ alarm_handler:
 	la      t0, current_process  # Get address of current_process variable
 	lw      a1, 0(t0)           # Load value (pointer) stored at that address
 	call    load_process_state
-	eret
 ### ================================================================================================================================
 
 
@@ -644,22 +657,13 @@ main_with_console:
 	lw a1, RAM_limit
 	call init_memory
 
-	## Initialize alarm system - do this just before running first program
-	# Enable alarm bit (bit 4) in mode register
-	csrr    t0, md                  # Read current mode
-	ori     t0, t0, 0x10           # Set alarm bit (bit 4)
-	csrw    md, t0                 # Write back to mode register
-
-	# Set initial alarm value
-	csrr    t0, ck                 # Get current cycle count
-	lw      t1, QUANTA_CYCLES      # Load QUANTA_CYCLES value
-	add     t0, t0, t1             # First alarm at current + QUANTA_CYCLES
-	csrw    al, t0                 # Set alarm register
+			## Initialize alarm system - do this just before running first program
 	
-	## Call run_programs() to invoke each program ROM in turn.
+	## Call run_programs() to invoke ROM 3
 	addi a0, zero, 3  # Start with ROM #3 (after BIOS and kernel)
 	call run_programs
-	
+
+main_no_program:
 	## Epilogue: If we reach here, there were no ROMs, so use the frame to emit an error message and halt.
 	la		a0,		no_programs_msg
 	call		print
@@ -765,7 +769,5 @@ blank_line:			"                                                                 
 run_programs_success: "All programs have been run successfully.\n"
 debug_received_msg: "Received syscall: 0x"
 debug_exit_msg: "EXIT code is: 0x"
-
-	## Marker to indicate the end of all static data
-kernel_end_marker: "KERNEL_END_MARKER"
+sys_call_made_msg: "System call made.\n"
 ### ================================================================================================================================

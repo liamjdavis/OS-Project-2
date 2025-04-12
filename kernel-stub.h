@@ -2,6 +2,7 @@
 #define _KERNEL_STUB_H
 
 #include "types.h"
+#include "process_info/process_info.h"
 
 /**
  * Copy the given PC value into CSR epc, then eret.
@@ -32,7 +33,14 @@ void print (char* msg);
  *
  * \param rom_number The ROM number to load and execute.
  */
-void run_programs(word_t rom_number);
+void run_programs(uint32_t rom_number);
+
+/**
+ * Loads process state and sets up next alarm.
+ *
+ * @param process_info Address of process_info structure
+ */
+void load_process_state(process_info_t* process_info);
 
 extern uint32_t none_device_code;
 extern uint32_t controller_device_code;

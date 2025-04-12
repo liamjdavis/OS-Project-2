@@ -6,57 +6,64 @@
 #include "../utility/utility.h"
 
 /* Function to insert a new process into the circular doubly linked list */
-void insert_process(process_info_t** head, int pid, const char* name, address_t sp, address_t pc) {
+process_info_t* insert_process(process_info_t* head, int pid, address_t sp, address_t pc) {
     process_info_t* new_process = (process_info_t*)malloc(sizeof(process_info_t));
     if (!new_process) {
         print("Memory allocation failed\n");
-        return;
+        return head;
     }
     new_process->pid = pid;
-    copy_str(new_process->name, name, 50);
     new_process->sp = sp;
     new_process->pc = pc;
 
-    if (*head == NULL) {
+    if (head == NULL) {
         new_process->next = new_process;
         new_process->prev = new_process;
-        *head = new_process;
+        return new_process;
     } else {
-        process_info_t* tail = (*head)->prev;
+        process_info_t* tail = head->prev;
         tail->next = new_process;
         new_process->prev = tail;
-        new_process->next = *head;
-        (*head)->prev = new_process;
+        new_process->next = head;
+        head->prev = new_process;
+        return new_process;
     }
 }
 
 /* Function to delete a process by PID */
-void delete_process(process_info_t** head, int pid) {
-    if (*head == NULL) return;
+process_info_t* delete_process(process_info_t* head, int pid) {
+    if (head == NULL) return NULL;
 
-    process_info_t *current = *head;
+    process_info_t *current = head;
+    process_info_t *new_head = head;
+    
     do {
         if (current->pid == pid) {
-            if (current->next == current) {
-                free(current);
-                *head = NULL;
-                return;
-            }
-            
             process_info_t* prev = current->prev;
             process_info_t* next = current->next;
+            
+            // If this is the last process
+            if (next == current) {
+                free(current);
+                return NULL;
+            }
+            
+            // Update links
             prev->next = next;
             next->prev = prev;
             
-            if (current == *head) {
-                *head = next;
+            // If we're deleting the head, update new_head
+            if (current == head) {
+                new_head = next;
             }
             
             free(current);
-            return;
+            return new_head;
         }
         current = current->next;
-    } while (current != *head);
+    } while (current != head);
+    
+    return head;  // Process not found
 }
 
 /* Function to display the process list */
@@ -77,8 +84,6 @@ void display_processes(process_info_t* head) {
         
         print("PID: ");
         print(pid_str);
-        print(", Name: ");
-        print(temp->name);
         print(", SP: ");
         print(sp_str);
         print(", PC: ");

@@ -5,22 +5,22 @@
 # Entry point
 _start:
     # Request execution of ROM 4
-    li a0, 4          # Load ROM number into a0
-    li a7, 1          # System call number 1 for ROM execution
+    li a1, 4          # Load ROM number into a1
+    li a0, 0xca110002 # System call number for ROM execution
     ecall             # Make the system call
 
     # Request execution of ROM 6
-    li a0, 6          # Load ROM number into a0
-    li a7, 1          # System call number 1 for ROM execution
+    li a1, 6          # Load ROM number into a0
+    li a0, 0xca110002 # System call number for ROM execution
     ecall             # Make the system call
 
     # Request execution of ROM 5
-    li a0, 5          # Load ROM number into a0
-    li a7, 1          # System call number 1 for ROM execution
+    li a1, 5          # Load ROM number into a0
+    li a0, 0xca110002 # System call number for ROM execution
     ecall             # Make the system call
 
     # Halt after all ROMs are requested
-    li a7, 93         # System call number 93 for exit
+    li a0, 0xca110001 # System call number for exit
     ecall             # Make the system call to exit
 
 .Text
